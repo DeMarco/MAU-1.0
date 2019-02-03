@@ -1,7 +1,7 @@
 #ifndef DEFINES_H_
 #define DEFINES_H_
 
-/* Geral */
+/* General definitions */
 #define HIGH	1
 #define LOW		0
 
@@ -12,11 +12,11 @@
 #define output_low(pin)			PORTB &= ~_BV(pin)
 
 
-/* Clock CPU */
+/* CPU Clock */
 #define F_CPU 1000000UL
 
 
-/* Pinagem ATtiny85 */
+/* ATtiny85 Pinnout */
 #define DI   PB0
 #define DO   PB1
 #define USCK PB2
@@ -24,7 +24,7 @@
 #define CSB  PB4
 
 
-/* Registradores BMP280 */
+/* BMP280 Registers */
 #define READ		0x80
 #define WRITE		0x7f
 #define BLANK		0x00
@@ -77,10 +77,10 @@
 #define BMP280_REG_DIG_P8	0x9c
 #define BMP280_REG_DIG_P9	0x9e
 
-//Coeficiente do Filtro IIR = 0;
+//IIR Filter Coefficient = 0;
 #define BMP280_FILTER_DISABLED		0
 
-//Coeficiente do Filtro IIR = 4;
+//IIR Filter Coefficient = 4;
 #define BMP280_FILTER_4				(_BV(FILTER1))
 
 //Temperature Oversampling = Ultra Low Power; Pressure Oversampling = Ultra Low Power; Mode = Normal;
@@ -89,10 +89,10 @@
 //Temperature Oversampling = Ultra Low Power; Pressure Oversampling = Ultra Low Power; Mode = Sleep;
 #define BMP280_SETUP_CTRL	(_BV(OSRS_T0) | _BV(OSRS_P0))
 
-//Período de leituras = 125ms; Coeficiente do Filtro IIR = 4;
+//Reading time interval = 125ms; IIR Filter Coefficient = 4;
 //#define BMP280_SETUP_CONFIG	(_BV(T_SB1) | _BV(FILTER1))
 
-//Coeficiente do Filtro IIR = 4;
+//IIR Filter Coefficient = 4;
 #define BMP280_SETUP_CONFIG	BMP280_FILTER_4
 
 
@@ -121,7 +121,7 @@
 #define PRESSURE		PRESS_MSB
 #define TEMPERATURE		TEMP_MSB
 
-/* Constantes da Equação Barométrica - Modelo 1: do solo até 11km de altitude */
+/* Barometric Equation Constants - Model 1: from sea level to 11km */
 #define	EQ1_Tb	(273,15 + 20)
 #define	EQ1_Lb	-0.0065
 #define	EQ1_R	8.31432
@@ -129,20 +129,20 @@
 #define	EQ1_M	0.0289644
 #define	EQ1_Pb	101325.0
 
-#define GROUND_FIXED_TEMP		20 //degC
+#define GROUND_FIXED_TEMP		20 //in degC
 #define GROUND_FIXED_TEMP_FINE	(((GROUND_FIXED_TEMP*100) << 8) - 128) / 5
 
-/* Configuração do Timer */
+/* Timer Setup */
 #define TIMER1_FULL_VALUE	256UL
 
-#define MAX_FLIGHT_TIME					48 //em segundos, MAX = 46.272
+#define MAX_FLIGHT_TIME					48 //in seconds, MAX = 46.272
 #define BMP280_MAX_CYCLE_COUNT			(MAX_FLIGHT_TIME / MEASUREMENT_PERIOD)
 #define BMP280_CYCLES_NUM_ASCENSION		4
 #define BMP280_CYCLES_NUM_GROUND		16
-#define BMP280_CYCLES_NUM_LANDED		20 //Aprox 4 seconds
-#define CYCLE_START_DELAY				56  //em segundos
+#define BMP280_CYCLES_NUM_LANDED		20 //Aproximately 4 seconds
+#define CYCLE_START_DELAY				56  //in seconds
 
-#define MEASUREMENT_PERIOD		0.192 //em segundos
+#define MEASUREMENT_PERIOD		0.192 //in seconds
 #define MEASUREMENT_INSTANT		0.192
 #define READOUT_INSTANT			0.142
 #define EEPROM_WRITE_INSTANT	0.132
@@ -150,7 +150,7 @@
 #define CONTROL_LED_INSTANT		0.010
 //#define LED_OFF_INSTANT			0.072
 
-/* Calculo de post scaler do Timer1 */
+/* TIMER1 post scaler calculation */
 #define _PS(instant)	(uint16_t)((instant * F_CPU) / TIMER1_FULL_VALUE)
 
 #define POST_SCALER_MEASUREMENT		_PS(MEASUREMENT_INSTANT)
@@ -159,7 +159,7 @@
 #define POST_SCALER_PROCESS			_PS(PROCESS_INSTANT)
 #define POST_SCALER_CONTROL_LED		_PS(CONTROL_LED_INSTANT)
 
-/* Definições de estado para o ciclo de leitura */
+/* Sampling cycle state names */
 #define DO_NOTHING	0
 #define MEASURE		1
 #define READ_OUT	2
@@ -168,17 +168,17 @@
 #define CONTROL_LED	5
 #define CYCLES_FULL	6
 
-/* Definição do tipo de processamento dentro do ciclo de leitura */
+/* Process names used during the sampling cycle */
 #define NO_PROCESSING				0
 #define MEASURE_GROUND_PRESSURE		1
 #define DETECT_ASCENSION			2
 #define DETECT_LANDING				3
 
-/* Definição de algumas calibrações */
+/* Variance thresholds for ascent and landing detection */
 #define MIN_VARIANCE_ASCENSION_DETECT	100
 #define MAX_VARIANCE_LANDING_DETECT		10
 
-/* Mapa EEPROM */
+/* NVM map */
 #ifdef TEST_MODE
 	#define EEPROM_ADDRESS_DATA_MAX			448
 	#define EEPROM_ADDRESS_GROUND_TEMP		448
@@ -195,7 +195,7 @@
 	#define EEPROM_ADDRESS_DIG_P6			EEPROM_ADDRESS_DIG_P5 + 2
 	#define EEPROM_ADDRESS_DIG_P7			EEPROM_ADDRESS_DIG_P6 + 2
 	#define EEPROM_ADDRESS_DIG_P8			EEPROM_ADDRESS_DIG_P7 + 2
-	#define EEPROM_ADDRESS_DIG_P9			EEPROM_ADDRESS_DIG_P8 + 2 
+	#define EEPROM_ADDRESS_DIG_P9			EEPROM_ADDRESS_DIG_P8 + 2
 	#define EEPROM_ADDRESS_DEBUG_1			478
 	#define EEPROM_ADDRESS_DEBUG_2			482
 	#define EEPROM_ADDRESS_H_MAX			486

@@ -42,7 +42,7 @@ int32_t t_fine;
 uint16_t *array_window_landing = 0, *array_window_ascension = 0, *array_window_ground = 0;
 
 
-// FUNÇÕES AUXILIARES //
+// AUXILIARY FUNCTIONS //
 
 void delay_1s (void)
 {
@@ -160,13 +160,13 @@ uint8_t SPI_transfer_byte(uint8_t byte_out)
 
 void SPI_write (uint8_t address, uint8_t data)
 {
-	//Baixar pino CSB (chip select)
+	//Set CSB pin (chip select) to OFF
 	PORTB &= ~_BV(CSB);
-	//Enviar endereco
+	//Send address
 	SPI_transfer_byte(address & WRITE);
-	//Enviar dado
+	//Send data
 	SPI_transfer_byte(data);
-	//Subir pino CSB
+	//Set CSB pin (chip select) to ON
 	PORTB |= _BV(CSB);
 }
 
@@ -174,37 +174,37 @@ uint8_t SPI_read_byte (uint8_t address)
 {
 	uint8_t data = 0;
 
-	//Baixar pino CSB (chip select)
+	//Set CSB pin (chip select) to OFF
 	PORTB &= ~_BV(CSB);
-	//Enviar endereco
+	//Send address
 	SPI_transfer_byte(address | READ);
-	//Receber dado
+	//Receive data
 	data = SPI_transfer_byte(BLANK);
-	//Subir pino CSB
+	//Set CSB pin (chip select) to ON
 	PORTB |= _BV(CSB);
 
 	return data;
 }
 
-uint32_t SPI_read_rawdata (uint8_t address) //O tipo de retorno pode ser uint16_t se o modo Ultra Low Power for utilizado
+uint32_t SPI_read_rawdata (uint8_t address) //The return type can be uint16_t as long as BMP280's Ultra Low Power mode is used
 {
 	uint8_t data[3];
 
-	//Baixar pino CSB (chip select)
+	//Set CSB pin (chip select) to OFF
 	output_low(CSB);
 
-	//Enviar endereco
+	//Send address
 	SPI_transfer_byte(address | READ);
 
-	//Receber dados
+	//Receive data
 	data[2] = SPI_transfer_byte(BLANK);
 	data[1] = SPI_transfer_byte(BLANK);
 	data[0] = SPI_transfer_byte(BLANK);
 
-	//Subir pino CSB
+	//Set CSB pin (chip select) to ON
 	output_high(CSB);
 
-	// Retorna raw data justificado à direita de acordo com o modo de amostragem:
+	//Returns raw data shifted to the right according to BMP280's sampling mode:
 	return ((data[2]<<8) + data[1]); // Ultra Low Power
 	//return ((data[2]*65536 + data[1]*256 + data[0]) >> 7); // Low Power
 	//return ((data[2]*65536 + data[1]*256 + data[0]) >> 6); // Standard Resolution
@@ -216,17 +216,17 @@ uint16_t SPI_read_calib_word (uint8_t calib_address)
 {
 	uint16_t calib_data = 0;
 
-	//Baixar pino CSB (chip select)
+	//Set CSB pin (chip select) to OFF
 	output_low(CSB);
 
-	//Enviar endereco
+	//Send address
 	SPI_transfer_byte(calib_address | READ);
 
-	//Receber dados
+	//Receive data
 	calib_data = SPI_transfer_byte(BLANK);
 	calib_data += (SPI_transfer_byte(BLANK) << 8);
 
-	//Subir pino CSB
+	//Set CSB pin (chip select) to ON
 	output_high(CSB);
 
 	return calib_data;
@@ -251,21 +251,21 @@ void SPI_read_calib_data(void)
 
 void EEPROM_write_byte(uint16_t address, uint8_t data)
 {
-	// Aguardar término da escrita anterior
+	// Wait previous write operation to finish
 	while(EECR & _BV(EEPE));
 
-	// Ativar modo de programação da EEPROM
+	// Activate EEPROM write mode
 	EECR &= (~_BV(EEPM1) & ~_BV(EEPM0));
 
-	// Preparar registradores de endereço e dado
+	// Prepare address and data registers
 	EEARL = address - 256;
 	EEARH = address / 256;
 	EEDR = data;
 
-	// Escrever "1" em EEMPE
+	// Write "1" to EEMPE
 	EECR |= _BV(EEMPE);
 
-	// Iniciar escrita em EEPROM ativando EEPE
+	// Begin EEPROM writing by activating EEPE
 	EECR |= _BV(EEPE);
 }
 
@@ -283,17 +283,17 @@ void EEPROM_write_dword(uint16_t address, uint32_t data)
 
 uint8_t EEPROM_read_byte(uint16_t address)
 {
-	// Aguardar término da escrita anterior
+	// Wait previous write operation to finish
 	while(EECR & _BV(EEPE));
 
-	// Preparar registrador de endereço
+	// Prepare address register
 	EEARL = address - 256;
 	EEARH = address / 256;
 
-	// Iniciar leitura da EEPROM ativando EERE
+	// Begin EEPROM reading by activating EERE
 	EECR |= _BV(EERE);
 
-	// Retornar dado armazenado no registrador de dado
+	// Return data stored in data register
 	return EEDR;
 }
 
@@ -324,8 +324,8 @@ void EEPROM_store_calib_data(void)
 	}
 }
 
-// Retorna a temperatura em ºC. Exemplo: valor de saída "5123" é igual a 51.23ºC
-// t_fine carrega o valor no formato utilizado para compensação de pressão.
+// Returns temperature in degC. Example: output value T = 5123 corresponds to 51.23 degC.
+// t_fine carries the temperature value as used for pressure compensation.
 int32_t bmp280_compensate_temp(int32_t t_raw)
 {
 	int32_t T;
@@ -351,8 +351,7 @@ int32_t bmp280_compensate_temp(int32_t t_raw)
 }
 
 // Returns pressure in Pa as unsigned 32 bit integer in Q24.8 format (24 integer bits and 8 fractional bits).
-// Retorna pressão em Pa, formato unsigned int 4 bytes, 3 MSBytes = parte inteira, 1 LSByte = parte decimal.
-// Exemplo: o valor de saída “24674867” representa 24674867/256 = 96386.2 Pa.
+// Exemple: output value P = 24674867 corresponds to 24674867/256 = 96386.2 Pa.
 uint32_t bmp280_compensate_press(int32_t p_raw)
 {
 	uint16_t dig_P1;
@@ -402,7 +401,7 @@ void report_apogee (void)
 
 	delay_1s();
 
-	// Checar se EEPROM não está vazia
+	// Ensure EEPROM is not empty
 	temperature_raw = EEPROM_read_word(EEPROM_ADDRESS_GROUND_TEMP);
 	if(temperature_raw != 0xFFFF)
 	{
@@ -414,21 +413,21 @@ void report_apogee (void)
 		bmp280_compensate_temp((int32_t)temperature_raw<<4);
 		#endif
 
-		// Calcular pressão no apogeu do último vôo
+		// Calculate apogee pressure of the recorded flight
 		pressure_raw = EEPROM_read_word(EEPROM_ADDRESS_PRESS_APOGEE);
 		pressure_true_apogee = bmp280_compensate_press((int32_t)pressure_raw <<4);
 		#ifdef TEST_MODE
 		EEPROM_write_dword(EEPROM_ADDRESS_TRUE_PRESS_LST, pressure_true_apogee);
 		#endif
 
-		// Calcular pressão no sólo do último vôo
+		// Calculate ground pressure of the recorded flight
 		pressure_raw = EEPROM_read_word(EEPROM_ADDRESS_PRESS_GROUND);
 		pressure_true_ground = bmp280_compensate_press((int32_t)pressure_raw <<4);
 		#ifdef TEST_MODE
 		EEPROM_write_dword(EEPROM_ADDRESS_TRUE_PRESS_HST, pressure_true_ground);
 		#endif
 
-		// Adaptar breakpoints do modelo atmosférico para fixed point
+		// Adapt atmospheric model breakpoints to Fixed Point format:
 		press_breakpoint = SENSOR_MAX_PRESSURE;
 		press_breakpoint <<= 8;
 		press_breakpoint_step = BREAKPOINTS_STEP;
@@ -442,7 +441,7 @@ void report_apogee (void)
 			height_array_tmp_prev = pgm_read_float(&height_array[i-1]);
 			coef = (pgm_read_float(&height_array[i]) - height_array_tmp_prev) / ((press_breakpoint - press_breakpoint_previous)>>8);
 
-			// Calcular altitude no  solo
+			// Calculate ground altitude
 			if((pressure_true_ground <= press_breakpoint_previous) && (pressure_true_ground >= press_breakpoint))
 			{
 				height_ground = coef * ((pressure_true_ground - press_breakpoint_previous)>>8) + height_array_tmp_prev;
@@ -452,7 +451,7 @@ void report_apogee (void)
 				#endif
 			}
 
-			// Calcular altitude no apogeu
+			// Calculate apogee altitude
 			if((pressure_true_apogee <= press_breakpoint_previous) && (pressure_true_apogee >= press_breakpoint))
 			{
 				height_apogee = coef * ((pressure_true_apogee - press_breakpoint_previous)>>8) + height_array_tmp_prev;
@@ -467,7 +466,7 @@ void report_apogee (void)
 		EEPROM_write_dword(EEPROM_ADDRESS_APOGEE, height_apogee - height_ground);
 		#endif
 
-		// Reportar apogeu em decímetros
+		// Report apogee in decimeters
 		LED_data((int32_t)((height_apogee - height_ground)*10));
 
 	}
@@ -475,30 +474,30 @@ void report_apogee (void)
 
 void bmp280_init (void)
 {
-	// Configurar BMP280
+	// Setup BMP280
 	SPI_write(CONFIG, BMP280_SETUP_CONFIG);
 	SPI_write(CTRL_MEAS, BMP280_SETUP_CTRL);
 
-	// Ler valores de calibração da memória do BMP280
+	// Read calibration constants from BMP280's internal memory
 	SPI_read_calib_data();
 }
 
 void ioinit (void)
 {
-    //Ativar TIMER 1 com clock principal do sistema
+	// Activate TIMER 1 using system main clock
 	TCCR1 = _BV(CS10);
 
-	//Configurar pinos DO, USCK, LED e CSB como Saída, e DI como entrada
+	// Set pins DO, USCK, LED and CSB as outputs, and DI as input
 	DDRB = (_BV(DO) | _BV(USCK) | _BV(LED) | _BV(CSB)) & ~_BV(DI);
 
-	//Configurar Universal Serial Interface para SPI (Three Wire mode) e modo SPI 00;
-	output_low(CSB); //Iniciar com CSB = 0 para BMP280 se fixar em modo SPI;
-	_delay_ms(10);
-	output_high(CSB); //Mantém CSB = 1 (condição para início de novas transmissões);
-	output_low(USCK); //Mantém UCSK = 0 (assim o BMP280 entende como SPI modo 00)
+	// Set Universal Serial Interface for SPI (Three Wire mode) and SPI mode 00;
+	output_low(CSB);  //Start with CSB OFF in order to fix BMP280 to SPI mode;
+	_delay_ms(10);    //Wait 10 ms
+	output_high(CSB); //Activate CSB and keep it ON (condition to initiate new transmissions);
+	output_low(USCK); //UCSK to OFF and keep it (so that BMP280 will be keept in SPI mode 00)
 	USICR = _BV(USIWM0) | _BV(USICS1) | _BV(USICLK);
 
-	//Habilitar interrupção por overflow do TIMER 1
+	// Enable TIMER 1 Overflow Interrupt
     TIMSK = _BV(TOIE1);
 }
 
@@ -617,7 +616,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 						}
 						else
 						{
-							//CÁLCULO DA PRESSÃO MÉDIA DE SOLO
+							// CALCULATE GROUND AVERAGE PRESSURE
 							numerator_ground = 0;
 							for(i = 1; i < (BMP280_CYCLES_NUM_GROUND + BMP280_CYCLES_NUM_ASCENSION); i++)
 							{
@@ -628,7 +627,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 							array_window_ground[i-1] = pressure_raw;
 							average_ground = numerator_ground / BMP280_CYCLES_NUM_GROUND;
 
-							//CÁLCULO DA VARIÂNCIA PARA DETECÇÃO DE ASCENÇÃO
+							// CALCULATE PRESSURE VARIANCE FOR ASCENT DETECTION
 							for(i = 1; i < BMP280_CYCLES_NUM_ASCENSION; i++)
 							{
 								array_window_ascension[i-1] = array_window_ascension[i];
@@ -644,12 +643,12 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 							}
 							variance /= BMP280_CYCLES_NUM_ASCENSION;
 
-							//SE ASCENÇÃO DETECTADA:
+							// IF ASCENT IS DETECTED:
 							if(variance > MIN_VARIANCE_ASCENSION_DETECT)
 							{
 								en_flags.rawdata_readout = FALSE;
 
-								// Registrar pressão de solo em memória não-volátil
+								// Record ground pressure in NVM:
 								cli();
 								EEPROM_write_word(EEPROM_ADDRESS_PRESS_GROUND, average_ground);
 								sei();
@@ -748,23 +747,23 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 }
 
 //////////////////////////////////////////////////////////////////
-//	FUNÇÃO MAIN
+//	MAIN FUNCTION
 //////////////////////////////////////////////////////////////////
 int main (void)
 {
-///////////////////// EXECUTAR INICIALIZAÇõES /////////////////////////////////////////////////////////////////
+///////////////////// RUN INITIALIZATIONS /////////////////////////////////////////////////////////////////
 
-	// Dados de pressão e temperature
+	// Temperature and pressure data
 	uint32_t temperature_raw = 0;
 	uint16_t raw_press_highest = 0;
 
-	// EEPROM
+	// NVM settings
 	uint16_t eeprom_initial_adr = 0;
 	uint16_t eeprom_final_adr = 0;
 	uint16_t eeprom_adr = 0;
 	uint16_t eeprom_data = 0;
 
-	// Inicialização das flags
+	// Flags initialization
 	int_flags.readout_cycle_state = DO_NOTHING;
 	en_flags.rawdata_readout = FALSE;
 	en_flags.rawdata_record = FALSE;
@@ -775,38 +774,38 @@ int main (void)
 	ioinit();
 	bmp280_init();
 
-	//LED_sign(); ///causa muita confusão nos usuários
+	//LED_sign(); ///Causes to much confusion as users tend to account this blinking into summing the flashes from apogee reporting.
 
-///////////////////// REPORTAR APOGEU DO VÔO ANTERIOR /////////////////////////////////////////////////////////////////
+///////////////////// REPORT RECORDED FLIGHT APOGEE /////////////////////////////////////////////////////////////////
 
 	report_apogee();
 
-///////////////////// AGUARDAR 60 SEGUNDOS ////////////////////////////////////////////////////////////////////////////
+///////////////////// ALLOW 60 SECONDS FOR INSTALLING ALTIMETER IN THE ROCKET ///////////////////////////////////////
 
 	delay_60s();
 
-///////////////////// FLUXO PRINCIPAL /////////////////////////////////////////////////////////////////////////////////
+///////////////////// MAIN FLOW /////////////////////////////////////////////////////////////////////////////////////
 
-	// Registrar temperatura no solo
+	// Measure and record ground temperature
 	SPI_write(CTRL_MEAS, BMP280_SETUP_CTRL | BMP280_MODE_FORCED);
 	_delay_ms(10);
 	temperature_raw = SPI_read_rawdata(TEMPERATURE);
 	EEPROM_write_word(EEPROM_ADDRESS_GROUND_TEMP, temperature_raw);
 
-	// Posicionar escrita em memória no endereco zero
+	// Make NVM writting initial address = 00h
 	eeprom_adr = eeprom_initial_adr;
 
-	// Habilitar interrupções globais
+	// Enable global interrupts
 	sei();
 
-	// Detectar ascensão, determinar e registrar pressão de solo em memória não volátil
+	// Detect ascent + Calculate and record ground average pressure in NVM;
 	rawdata_readout_cycles_number = BMP280_CYCLES_NUM_GROUND + BMP280_CYCLES_NUM_ASCENSION;
 	en_flags.infinite_readout_cycles = TRUE;
 	en_flags.rawdata_readout = TRUE;
-	//en_flags.rawdata_record = TRUE; //DELETAR DEPOIS
+	//en_flags.rawdata_record = TRUE; ///TO BE DELETED
 	rawdata_readout_cycle(&eeprom_adr, DETECT_ASCENSION);
 
-	// Armazenar dados de vôo e detectar pouso
+	// Record flight data + Detect landing;
 	SPI_write(CONFIG, BMP280_FILTER_DISABLED);
 	rawdata_readout_cycles_number = BMP280_MAX_CYCLE_COUNT;
 	en_flags.rawdata_record = TRUE;
@@ -817,14 +816,14 @@ int main (void)
 	free(array_window_landing);
 
 	cli();
-	TCCR1 &= ~_BV(CS10); // Desativar Timer1
+	TCCR1 &= ~_BV(CS10); // Deactivate TIMER1
 
 	eeprom_final_adr = eeprom_adr;
 	#ifdef TEST_MODE
 	EEPROM_write_word(EEPROM_ADDRESS_LAST, eeprom_final_adr);
 	#endif
 
-	// Salvar em memória amostras da janela de detecção de ascensão
+	// Save samples used in ascent detection to NVM;
 	eeprom_adr = eeprom_initial_adr;
 	for(i = 0; i < BMP280_CYCLES_NUM_ASCENSION; i++)
 	{
@@ -835,7 +834,7 @@ int main (void)
 	free(array_window_ascension);
 	free(array_window_ground);
 
-	// Determinar pressão no apogeu e gravar em memória
+	// Calculate apogee pressure and record it to NVM
 	for(eeprom_adr = eeprom_initial_adr; eeprom_adr < eeprom_final_adr; eeprom_adr += 2)
 	{
 		eeprom_data = EEPROM_read_word(eeprom_adr);
@@ -844,20 +843,16 @@ int main (void)
 	}
 	EEPROM_write_word(EEPROM_ADDRESS_PRESS_APOGEE, raw_press_highest);
 
-	// Apagar memória não utilizada durante o vôo
+	// Erase NVM slots not used for flight data recording
 	for(eeprom_adr = eeprom_final_adr; eeprom_adr < EEPROM_ADDRESS_DATA_MAX; eeprom_adr += 2)
 		EEPROM_write_word(eeprom_adr, 0xffff);
 
-///////////////////// REPORTAR APOGEU DO VÔO ANTERIOR /////////////////////////////////////////////////////////////////
-
-	//report_apogee(); ///depois que pousa não precisa, só gasta mais bateria
-
-	// Armazenar dados de clibração em memória
+	// Store BMP280's calibration constants into NVM
 	EEPROM_store_calib_data();
 
 ///////////////////// AUTO POWER DOWN /////////////////////////////////////////////////////////////////
 
-	LED_sign();
+	LED_sign(); //For the sake of testing, so that I know when the altimeter reached the end of the flow.
 
 	cli();
 	set_sleep_mode(SLEEP_MODE_PWR_DOWN);
