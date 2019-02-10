@@ -430,10 +430,10 @@ void report_apogee (void)
 		// Adapt atmospheric model breakpoints to Fixed Point format:
 		press_breakpoint = SENSOR_MAX_PRESSURE;
 		press_breakpoint <<= 8;
-		press_breakpoint_step = BREAKPOINTS_STEP;
+		press_breakpoint_step = PRESSURE_STEP;
 		press_breakpoint_step <<= 8;
 
-		for(i=1; i < BREAKPOINTS_NUMBER; i++)
+		for(i=1; i < NUMBER_OF_BREAKPOINTS; i++)
 		{
 			press_breakpoint_previous = press_breakpoint;
 			press_breakpoint -= press_breakpoint_step;
