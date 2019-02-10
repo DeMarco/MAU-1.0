@@ -653,7 +653,9 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 								EEPROM_write_word(EEPROM_ADDRESS_PRESS_GROUND, average_ground);
 								sei();
 
-								array_window_ascension[0] = average_ground; //????????
+								array_window_ascension[0] = average_ground; //So that the chart starts at 0m.
+								//Instead of forcing the first sample to zero meters, shouldn't all smples be
+								//offsetted according to: sample[0] +/- average ?
 
 								#ifdef TEST_MODE
 								cli();
