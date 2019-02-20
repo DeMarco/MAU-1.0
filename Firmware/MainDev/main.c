@@ -585,8 +585,16 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 				if(en_flags.rawdata_record)
 				{
 					if(*eeprom_address >= EEPROM_ADDRESS_DATA_MAX)
-						//*eeprom_address = 0;
-						en_flags.rawdata_readout = FALSE;
+					{
+						//*eeprom_address = 0;	//Enabling this line and commenting the one
+																		//below would enable infinite recording in
+																		//the NVM, but of course causing the overwrite
+																		//of contents everytime the address reached
+																		//its maximum allowed value.
+						en_flags.rawdata_readout = FALSE; //This line ensures the altimeter
+																							//will stop recording once the
+																							//NVM is full.
+					}
 					else
 					{
 						cli();
