@@ -33,6 +33,7 @@ volatile struct
 	uint8_t rawdata_readout: 1;
 	uint8_t rawdata_record: 1;
 	uint8_t infinite_readout_cycles: 1;
+	uint8_t low_freq_sampling_rate: 1;
 }
 en_flags;
 
@@ -56,7 +57,7 @@ void delay_60s (void)
 {
 	uint8_t i;
 
-	for (i = 0; i < CYCLE_START_DELAY; i++)
+	for (i = 0; i < ROCKET_ASSEMBLY_DELAY; i++)
 		delay_1s();
 }
 
@@ -503,7 +504,7 @@ void ioinit (void)
 
 ISR(TIMER1_OVF_vect)
 {
-	static uint16_t scaler = POST_SCALER_MEASUREMENT + 1;
+	static uint16_t scaler = POST_SCALER_BEGIN_CYCLE_HF + 1;
 	static uint8_t cycle_count = 0;
 
 	if(en_flags.rawdata_readout)
@@ -536,7 +537,10 @@ ISR(TIMER1_OVF_vect)
 						en_flags.rawdata_readout = FALSE;
 					}
 				}
-				scaler = POST_SCALER_MEASUREMENT + 1;
+				if(en_flags.low_freq_sampling_rate)
+					scaler = POST_SCALER_BEGIN_CYCLE_LF + 1;
+				else
+					scaler = POST_SCALER_BEGIN_CYCLE_HF + 1;
 				break;
 		}
 	}
@@ -554,16 +558,17 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 	int32_t average_ground = 0;
 	int32_t variance = 0;
 	int32_t term = 0;
+	uint32_t window_size_landing_detection = 20;
 
 	switch(process_type)
 	{
 		case DETECT_ASCENSION:
-			array_window_ascension = malloc(2*BMP280_CYCLES_NUM_ASCENSION);
-			array_window_ground = malloc(2*(BMP280_CYCLES_NUM_GROUND + BMP280_CYCLES_NUM_ASCENSION));
+			array_window_ascension = malloc(2*WINDOW_SIZE_ASCENT_DETECTION);
+			array_window_ground = malloc(2*(WINDOW_SIZE_GROUND_PRESS_CALC + WINDOW_SIZE_ASCENT_DETECTION));
 			break;
 
 		case DETECT_LANDING:
-			array_window_landing = malloc(2*BMP280_CYCLES_NUM_LANDED);
+			array_window_landing = malloc(2*window_size_landing_detection);
 			break;
 	}
 
@@ -613,12 +618,12 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 						break;
 
 					case DETECT_ASCENSION:
-						if(count < (BMP280_CYCLES_NUM_GROUND + BMP280_CYCLES_NUM_ASCENSION))
+						if(count < (WINDOW_SIZE_GROUND_PRESS_CALC + WINDOW_SIZE_ASCENT_DETECTION))
 						{
 							array_window_ground[count] = pressure_raw;
-							if(count >= BMP280_CYCLES_NUM_GROUND)
+							if(count >= WINDOW_SIZE_GROUND_PRESS_CALC)
 							{
-								array_window_ascension[count - BMP280_CYCLES_NUM_GROUND] = pressure_raw;
+								array_window_ascension[count - WINDOW_SIZE_GROUND_PRESS_CALC] = pressure_raw;
 							}
 							count++;
 						}
@@ -626,30 +631,30 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 						{
 							// CALCULATE GROUND AVERAGE PRESSURE
 							numerator_ground = 0;
-							for(i = 1; i < (BMP280_CYCLES_NUM_GROUND + BMP280_CYCLES_NUM_ASCENSION); i++)
+							for(i = 1; i < (WINDOW_SIZE_GROUND_PRESS_CALC + WINDOW_SIZE_ASCENT_DETECTION); i++)
 							{
 								array_window_ground[i-1] = array_window_ground[i];
-								if(i <= BMP280_CYCLES_NUM_GROUND)
+								if(i <= WINDOW_SIZE_GROUND_PRESS_CALC)
 									numerator_ground += array_window_ground[i-1];
 							}
 							array_window_ground[i-1] = pressure_raw;
-							average_ground = numerator_ground / BMP280_CYCLES_NUM_GROUND;
+							average_ground = numerator_ground / WINDOW_SIZE_GROUND_PRESS_CALC;
 
 							// CALCULATE PRESSURE VARIANCE FOR ASCENT DETECTION
-							for(i = 1; i < BMP280_CYCLES_NUM_ASCENSION; i++)
+							for(i = 1; i < WINDOW_SIZE_ASCENT_DETECTION; i++)
 							{
 								array_window_ascension[i-1] = array_window_ascension[i];
 								numerator += array_window_ascension[i];
 							}
 							array_window_ascension[i-1] = pressure_raw;
 							numerator += pressure_raw;
-							average = numerator / BMP280_CYCLES_NUM_ASCENSION;
-							for(i = 0; i < BMP280_CYCLES_NUM_ASCENSION; i++)
+							average = numerator / WINDOW_SIZE_ASCENT_DETECTION;
+							for(i = 0; i < WINDOW_SIZE_ASCENT_DETECTION; i++)
 							{
 								term = array_window_ascension[i] - average;
 								variance += term*term;
 							}
-							variance /= BMP280_CYCLES_NUM_ASCENSION;
+							variance /= WINDOW_SIZE_ASCENT_DETECTION;
 
 							// IF ASCENT IS DETECTED:
 							if(variance > MIN_VARIANCE_ASCENSION_DETECT)
@@ -678,7 +683,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 						break;
 
 					case DETECT_LANDING:
-						if(count < BMP280_CYCLES_NUM_LANDED)
+						if(count < window_size_landing_detection)
 						{
 							numerator += pressure_raw;
 							array_window_landing[count] = pressure_raw;
@@ -686,20 +691,20 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 						}
 						else
 						{
-							for(i=1; i < BMP280_CYCLES_NUM_LANDED; i++)
+							for(i=1; i < window_size_landing_detection; i++)
 							{
 								array_window_landing[i-1] = array_window_landing[i];
 								numerator += array_window_landing[i];
 							}
 							array_window_landing[i-1] = pressure_raw;
 							numerator += pressure_raw;
-							average = numerator / BMP280_CYCLES_NUM_LANDED;
-							for(i = 0; i < BMP280_CYCLES_NUM_LANDED; i++)
+							average = numerator / window_size_landing_detection;
+							for(i = 0; i < window_size_landing_detection; i++)
 							{
 								term = array_window_landing[i] - average;
 								variance += term*term;
 							}
-							variance /= BMP280_CYCLES_NUM_LANDED;
+							variance /= window_size_landing_detection;
 							if(variance < MAX_VARIANCE_LANDING_DETECT)
 							{
 								en_flags.rawdata_readout = FALSE;
@@ -728,7 +733,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 						break;
 
 					case DETECT_ASCENSION:
-						if(count > BMP280_CYCLES_NUM_GROUND)
+						if(count > WINDOW_SIZE_GROUND_PRESS_CALC)
 						{
 							if(++cycle_count_LED == 5)
 							{
@@ -777,6 +782,7 @@ int main (void)
 	int_flags.readout_cycle_state = DO_NOTHING;
 	en_flags.rawdata_readout = FALSE;
 	en_flags.rawdata_record = FALSE;
+	en_flags.low_freq_sampling_rate = FALSE;
 
 	// Misc
 	uint8_t i = 0;
@@ -809,7 +815,7 @@ int main (void)
 	sei();
 
 	// Detect ascent + Calculate and record ground average pressure in NVM;
-	rawdata_readout_cycles_number = BMP280_CYCLES_NUM_GROUND + BMP280_CYCLES_NUM_ASCENSION;
+	rawdata_readout_cycles_number = WINDOW_SIZE_GROUND_PRESS_CALC + WINDOW_SIZE_ASCENT_DETECTION;
 	en_flags.infinite_readout_cycles = TRUE;
 	en_flags.rawdata_readout = TRUE;
 	//en_flags.rawdata_record = TRUE; ///TO BE DELETED
@@ -817,11 +823,11 @@ int main (void)
 
 	// Record flight data + Detect landing;
 	SPI_write(CONFIG, BMP280_FILTER_DISABLED);
-	rawdata_readout_cycles_number = BMP280_MAX_CYCLE_COUNT;
+	rawdata_readout_cycles_number = MAX_SAMPLE_AMOUNT;
 	en_flags.rawdata_record = TRUE;
 	en_flags.infinite_readout_cycles = FALSE;
 	en_flags.rawdata_readout = TRUE;
-	eeprom_adr += (BMP280_CYCLES_NUM_ASCENSION * 2);
+	eeprom_adr += (WINDOW_SIZE_ASCENT_DETECTION * 2);
 	rawdata_readout_cycle(&eeprom_adr, DETECT_LANDING);
 	free(array_window_landing);
 
@@ -835,7 +841,7 @@ int main (void)
 
 	// Save samples used in ascent detection to NVM;
 	eeprom_adr = eeprom_initial_adr;
-	for(i = 0; i < BMP280_CYCLES_NUM_ASCENSION; i++)
+	for(i = 0; i < WINDOW_SIZE_ASCENT_DETECTION; i++)
 	{
 		EEPROM_write_word(eeprom_adr, array_window_ascension[i]);
 		eeprom_adr += 2;
