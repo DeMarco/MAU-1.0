@@ -41,6 +41,8 @@ uint8_t rawdata_readout_cycles_number = 0;
 uint16_t calib_data_temp[3], calib_data_press[9];
 int32_t t_fine;
 uint16_t *array_window_landing = 0, *array_window_ascension = 0, *array_window_ground = 0;
+int32_t *window_avg_press_change_rates = 0;
+float *window_samples_timestamps = 0;
 
 
 // AUXILIARY FUNCTIONS //
@@ -558,7 +560,12 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 	int32_t average_ground = 0;
 	int32_t variance = 0;
 	int32_t term = 0;
+
 	uint32_t window_size_landing_detection = 20;
+
+	int32_t avg_press_change_rate = 0;
+
+	static float sample_timestamp = 0.0;
 
 	switch(process_type)
 	{
@@ -569,6 +576,8 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 
 		case DETECT_LANDING:
 			array_window_landing = malloc(2*window_size_landing_detection);
+			window_samples_timestamps = malloc(sizeof(float)*window_size_landing_detection);
+			window_avg_press_change_rates = malloc(sizeof(int32_t)*window_size_landing_detection);
 			break;
 	}
 
@@ -612,6 +621,13 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 				break;
 
 			case PROCESS:
+				// Register the timestamp of the sample:
+				if(en_flags.low_freq_sampling_rate)
+					sample_timestamp += CYCLE_DURATION_LF;
+				else
+					sample_timestamp += CYCLE_DURATION_HF;
+
+				// Do process:
 				switch(process_type)
 				{
 					case NO_PROCESSING:
@@ -683,28 +699,63 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 						break;
 
 					case DETECT_LANDING:
+						// First, fulfill the window with its first 20 samples
 						if(count < window_size_landing_detection)
 						{
-							numerator += pressure_raw;
 							array_window_landing[count] = pressure_raw;
+							window_samples_timestamps[count] = sample_timestamp;
+
 							count++;
 						}
-						else
+						// From this point on, the window already has at least 20 valid samples.
+						// Now, fulfill the array of calculated pressure change rates with its first 20 values.
+						else if((count >= window_size_landing_detection) && (count < window_size_landing_detection*2))
 						{
+							// Continue to register pressure samples:
 							for(i=1; i < window_size_landing_detection; i++)
 							{
 								array_window_landing[i-1] = array_window_landing[i];
-								numerator += array_window_landing[i];
+								window_samples_timestamps[i-1] = window_samples_timestamps[i];
 							}
 							array_window_landing[i-1] = pressure_raw;
-							numerator += pressure_raw;
+							window_samples_timestamps[i-1] = sample_timestamp;
+
+							// Calculate and register average pressure change rate with the first and last samples of the window
+							avg_press_change_rate = (int32_t)((array_window_landing[window_size_landing_detection-1] - array_window_landing[0])
+																		/ (window_samples_timestamps[window_size_landing_detection-1] - window_samples_timestamps[0]));
+							window_avg_press_change_rates[count-window_size_landing_detection] = avg_press_change_rate;
+
+							count++;
+						}
+						// From this point on, the array of calculated pressure change rates has at least 20 valid values.
+						// Now the actual variance calculation can start using those values.
+						else
+						{
+							// Continue to register pressure samples and calculate change rates:
+							for(i=1; i < window_size_landing_detection; i++)
+							{
+								array_window_landing[i-1] = array_window_landing[i];
+								window_samples_timestamps[i-1] = window_samples_timestamps[i];
+								window_avg_press_change_rates[i-1] = window_avg_press_change_rates[i];
+								numerator += window_avg_press_change_rates[i];
+							}
+							array_window_landing[i-1] = pressure_raw;
+							window_samples_timestamps[i-1] = sample_timestamp;
+							avg_press_change_rate = (int32_t)((array_window_landing[window_size_landing_detection-1] - array_window_landing[0])
+																		/ (window_samples_timestamps[window_size_landing_detection-1] - window_samples_timestamps[0]));
+							window_avg_press_change_rates[i-1] = avg_press_change_rate;
+							numerator += avg_press_change_rate;
+
+							// Calculate the variance of the pressure change rates:
 							average = numerator / window_size_landing_detection;
 							for(i = 0; i < window_size_landing_detection; i++)
 							{
-								term = array_window_landing[i] - average;
+								term = window_avg_press_change_rates[i] - average;
 								variance += term*term;
 							}
 							variance /= window_size_landing_detection;
+
+							// Check if variance is below the threshold that indicates landing detected:
 							if(variance < MAX_VARIANCE_LANDING_DETECT)
 							{
 								en_flags.rawdata_readout = FALSE;
@@ -828,8 +879,11 @@ int main (void)
 	en_flags.infinite_readout_cycles = FALSE;
 	en_flags.rawdata_readout = TRUE;
 	eeprom_adr += (WINDOW_SIZE_ASCENT_DETECTION * 2);
+	//rawdata_readout_cycle(&eeprom_adr, NO_PROCESSING);
 	rawdata_readout_cycle(&eeprom_adr, DETECT_LANDING);
 	free(array_window_landing);
+	free(window_samples_timestamps);
+	free(window_avg_press_change_rates);
 
 	cli();
 	TCCR1 &= ~_BV(CS10); // Deactivate TIMER1
@@ -846,7 +900,6 @@ int main (void)
 		EEPROM_write_word(eeprom_adr, array_window_ascension[i]);
 		eeprom_adr += 2;
 	}
-
 	free(array_window_ascension);
 	free(array_window_ground);
 

@@ -142,7 +142,7 @@
 #define WINDOW_SIZE_GROUND_PRESS_CALC		16
 //#define WINDOW_SIZE_LANDING_DETECTION		20 //Aproximately 4 seconds --> ///became a variable
 
-#define ROCKET_ASSEMBLY_DELAY						56 //in seconds
+#define ROCKET_ASSEMBLY_DELAY						10 //in seconds
 
 #define CYCLE_DURATION_LF			1		  //in seconds
 #define CYCLE_DURATION_HF			0.192 //in seconds
