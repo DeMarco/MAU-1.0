@@ -700,7 +700,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 								variance += term*term;
 							}
 							variance /= BMP280_CYCLES_NUM_LANDED;
-							if((variance > 0) && (variance < MAX_VARIANCE_LANDING_DETECT))
+							if(variance < MAX_VARIANCE_LANDING_DETECT)
 							{
 								en_flags.rawdata_readout = FALSE;
 
