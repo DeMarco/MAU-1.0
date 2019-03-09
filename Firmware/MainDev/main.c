@@ -34,6 +34,7 @@ volatile struct
 	uint8_t rawdata_record: 1;
 	uint8_t infinite_readout_cycles: 1;
 	uint8_t low_freq_sampling_rate: 1;
+	uint8_t sampl_rate_reduc_not_needed: 1;
 }
 en_flags;
 
@@ -41,7 +42,7 @@ uint8_t rawdata_readout_cycles_number = 0;
 uint16_t calib_data_temp[3], calib_data_press[9];
 int32_t t_fine;
 uint16_t *array_window_landing = 0, *array_window_ascension = 0, *array_window_ground = 0;
-int32_t *window_avg_press_change_rates = 0;
+float *window_avg_press_change_rates = 0;
 float *window_samples_timestamps = 0;
 
 
@@ -554,16 +555,16 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 	uint8_t count = 0;
 	uint8_t i = 0;
 	uint8_t cycle_count_LED = 0;
-	uint32_t numerator = 0;
-	uint32_t numerator_ground = 0;
+	int32_t numerator = 0;
+	int32_t numerator_ground = 0;
 	int32_t average = 0;
 	int32_t average_ground = 0;
 	int32_t variance = 0;
 	int32_t term = 0;
 
-	uint32_t window_size_landing_detection = 20;
+	int32_t window_size_landing_detection = 20;
 
-	int32_t avg_press_change_rate = 0;
+	float avg_press_change_rate = 0.0;
 
 	static float sample_timestamp = 0.0;
 
@@ -577,7 +578,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 		case DETECT_LANDING:
 			array_window_landing = malloc(2*window_size_landing_detection);
 			window_samples_timestamps = malloc(sizeof(float)*window_size_landing_detection);
-			window_avg_press_change_rates = malloc(sizeof(int32_t)*window_size_landing_detection);
+			window_avg_press_change_rates = malloc(sizeof(float)*window_size_landing_detection);
 			break;
 	}
 
@@ -688,7 +689,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 
 								#ifdef TEST_MODE
 								cli();
-								EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_1, variance);
+								//EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_1, variance);
 								sei();
 								#endif
 							}
@@ -721,8 +722,8 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 							window_samples_timestamps[i-1] = sample_timestamp;
 
 							// Calculate and register average pressure change rate with the first and last samples of the window
-							avg_press_change_rate = (int32_t)((array_window_landing[window_size_landing_detection-1] - array_window_landing[0])
-																		/ (window_samples_timestamps[window_size_landing_detection-1] - window_samples_timestamps[0]));
+							avg_press_change_rate = abs(array_window_landing[window_size_landing_detection-1] - array_window_landing[0])
+														/ (window_samples_timestamps[window_size_landing_detection-1] - window_samples_timestamps[0]);
 							window_avg_press_change_rates[count-window_size_landing_detection] = avg_press_change_rate;
 
 							count++;
@@ -741,8 +742,10 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 							}
 							array_window_landing[i-1] = pressure_raw;
 							window_samples_timestamps[i-1] = sample_timestamp;
-							avg_press_change_rate = (int32_t)((array_window_landing[window_size_landing_detection-1] - array_window_landing[0])
-																		/ (window_samples_timestamps[window_size_landing_detection-1] - window_samples_timestamps[0]));
+
+							// Calculate and register average pressure change rate with the first and last samples of the window
+							avg_press_change_rate = abs(array_window_landing[window_size_landing_detection-1] - array_window_landing[0])
+														/ (window_samples_timestamps[window_size_landing_detection-1] - window_samples_timestamps[0]);
 							window_avg_press_change_rates[i-1] = avg_press_change_rate;
 							numerator += avg_press_change_rate;
 
@@ -755,16 +758,36 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 							}
 							variance /= window_size_landing_detection;
 
-							// Check if variance is below the threshold that indicates landing detected:
-							if(variance < MAX_VARIANCE_LANDING_DETECT)
+							// Check if variance is below the threshold that indicates parachute descent detected:
+							if(variance < MAX_VARIANCE_PARACHUTE_DETECT)
 							{
-								en_flags.rawdata_readout = FALSE;
+								// Check if pressure change rate is close to zero, indicating that landing already occurred:
+								if(avg_press_change_rate <= 1) //avg_press_change_rate is absolute, thus never below zero.
+								{
+									en_flags.rawdata_readout = FALSE;
 
-								#ifdef TEST_MODE
-								cli();
-								EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_2, variance);
-								sei();
-								#endif
+									#ifdef TEST_MODE
+									cli();
+									EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_1, variance);
+									EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_2, (int32_t)avg_press_change_rate);
+									sei();
+									#endif
+								}
+								else
+								{
+									if(!en_flags.low_freq_sampling_rate && !en_flags.sampl_rate_reduc_not_needed)
+									{
+										// Calculate if landing is expected within the available remaining NVM slots at current sampling rate:
+
+
+									}
+
+								}
+
+
+
+
+
 							}
 							numerator = 0;
 							average = 0;

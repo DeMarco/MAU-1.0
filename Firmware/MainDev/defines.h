@@ -180,8 +180,10 @@
 #define DETECT_LANDING				3
 
 /* Variance thresholds for ascent and landing detection */
-#define MIN_VARIANCE_ASCENSION_DETECT	100
-#define MAX_VARIANCE_LANDING_DETECT		10
+#define MIN_VARIANCE_ASCENSION_DETECT		100
+#define MAX_VARIANCE_PARACHUTE_DETECT		10 	// If below this level: the rocket
+ 																						// should be descending at a near
+																						// constant speed helped by a parachute
 
 /* NVM map */
 #ifdef TEST_MODE
