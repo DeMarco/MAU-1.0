@@ -185,6 +185,8 @@
  																						// should be descending at a near
 																						// constant speed helped by a parachute
 
+#define PREDICTED_FLIGHT_TIME_ERROR		3 // in seconds
+
 /* NVM map */
 #ifdef TEST_MODE
 

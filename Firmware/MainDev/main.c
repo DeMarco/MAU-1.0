@@ -6,6 +6,7 @@
  */
 
 //#define	TEST_MODE
+//#define FLIGHT_SIM
 //#define	FIXED_TEMPERATURE
 
 #include "defines.h"
@@ -21,6 +22,12 @@
 #include <avr/pgmspace.h>
 
 #include "AtmosModel_100_v3.h"
+
+#ifdef FLIGHT_SIM
+//#include "FlightProfile_Urano.h"
+//#include "FlightProfile_130.h"
+#include "FlightProfile_500.h"
+#endif
 
 volatile struct
 {
@@ -567,6 +574,10 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 	float remaining_EEPROM_time = 0.0;
 	float probable_descent_time = 0.0;
 
+	#ifdef FLIGHT_SIM
+	static uint16_t flight_profile_index = 0;
+	#endif
+
 	switch(process_type)
 	{
 		case DETECT_ASCENSION:
@@ -591,7 +602,13 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 				break;
 
 			case READ_OUT:
+				#ifdef FLIGHT_SIM
+				pressure_raw = pgm_read_word(&pressure_samples[flight_profile_index]);
+				flight_profile_index++;
+				#else
 				pressure_raw = SPI_read_rawdata(PRESSURE);
+				#endif
+
 				int_flags.readout_cycle_state = DO_NOTHING;
 				break;
 
@@ -787,7 +804,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 										sei();
 										#endif
 
-										if(remaining_EEPROM_time > probable_descent_time)
+										if(remaining_EEPROM_time > (probable_descent_time + PREDICTED_FLIGHT_TIME_ERROR))
 										{
 											en_flags.sampl_rate_reduc_not_needed = TRUE;
 										}
