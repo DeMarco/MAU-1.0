@@ -558,15 +558,14 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 	int32_t numerator = 0;
 	int32_t numerator_ground = 0;
 	int32_t average = 0;
-	int32_t average_ground = 0;
+	static int32_t average_ground = 0; //static, so the value is not flushed when the ascent detection process is finished
 	int32_t variance = 0;
 	int32_t term = 0;
-
 	int32_t window_size_landing_detection = 20;
-
 	float avg_press_change_rate = 0.0;
-
 	static float sample_timestamp = 0.0;
+	float remaining_EEPROM_time = 0.0;
+	float probable_descent_time = 0.0;
 
 	switch(process_type)
 	{
@@ -778,16 +777,30 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 									if(!en_flags.low_freq_sampling_rate && !en_flags.sampl_rate_reduc_not_needed)
 									{
 										// Calculate if landing is expected within the available remaining NVM slots at current sampling rate:
+										remaining_EEPROM_time = CYCLE_DURATION_HF * ((EEPROM_ADDRESS_DATA_MAX - *eeprom_address - 2) / 2); // *eeprom_address - 2 = current address
+										probable_descent_time = abs(pressure_raw - average_ground) / avg_press_change_rate;
 
+										#ifdef TEST_MODE
+										cli();
+										EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_3, (int32_t)remaining_EEPROM_time);
+										EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_4, (int32_t)probable_descent_time);
+										sei();
+										#endif
 
+										if(remaining_EEPROM_time > probable_descent_time)
+										{
+											en_flags.sampl_rate_reduc_not_needed = TRUE;
+										}
+										else
+										{
+											en_flags.low_freq_sampling_rate = TRUE;
+											window_size_landing_detection = 5;
+											cli();
+											EEPROM_write_word(EEPROM_ADDRESS_SAMPL_RATE_CHNG, *eeprom_address);
+											sei();
+										}
 									}
-
 								}
-
-
-
-
-
 							}
 							numerator = 0;
 							average = 0;
@@ -868,7 +881,7 @@ int main (void)
 
 ///////////////////// REPORT RECORDED FLIGHT APOGEE /////////////////////////////////////////////////////////////////
 
-	report_apogee();
+	//report_apogee();
 
 ///////////////////// ALLOW 60 SECONDS FOR INSTALLING ALTIMETER IN THE ROCKET ///////////////////////////////////////
 
