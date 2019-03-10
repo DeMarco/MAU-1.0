@@ -706,11 +706,11 @@ void rawdata_readout_cycle (uint16_t *eeprom_address)
 								//Instead of forcing the first sample to zero meters, shouldn't all smples be
 								//offsetted according to: sample[0] +/- average ?
 
-								#ifdef TEST_MODE
+								/*#ifdef TEST_MODE
 								cli();
-								//EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_1, variance);
+								EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_1, variance);
 								sei();
-								#endif
+								#endif*/
 
 								// Switch to Record flight data + Detect landing;
 								SPI_write(CONFIG, BMP280_FILTER_DISABLED);
@@ -799,6 +799,8 @@ void rawdata_readout_cycle (uint16_t *eeprom_address)
 									EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_2, (int32_t)avg_press_change_rate);
 									sei();
 									#endif
+
+									// After this point, the loop is broken and the program returns to main();
 								}
 								else
 								{
@@ -862,6 +864,8 @@ void rawdata_readout_cycle (uint16_t *eeprom_address)
 				break;
 		}
 	}
+
+	cli();
 }
 
 //////////////////////////////////////////////////////////////////
@@ -869,7 +873,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address)
 //////////////////////////////////////////////////////////////////
 int main (void)
 {
-///////////////////// RUN INITIALIZATIONS /////////////////////////////////////////////////////////////////
+	//// RUN INITIALIZATIONS: ////
 
 	// Temperature and pressure data
 	uint32_t temperature_raw = 0;
@@ -896,40 +900,42 @@ int main (void)
 
 	//LED_sign(); ///Causes to much confusion as users tend to account this blinking into summing the flashes from apogee reporting.
 
-///////////////////// REPORT RECORDED FLIGHT APOGEE /////////////////////////////////////////////////////////////////
+	//// CALCULATE AND REPORT RECORDED FLIGHT APOGEE: ////
 
 	//report_apogee();
 
-///////////////////// ALLOW 60 SECONDS FOR INSTALLING ALTIMETER IN THE ROCKET ///////////////////////////////////////
-
+	//// ALLOW TIME FOR INSTALLING ALTIMETER IN THE ROCKET: ////
 	delay_60s();
 
-///////////////////// MAIN FLOW /////////////////////////////////////////////////////////////////////////////////////
+	//// MEASURE AND RECORD GROUND TEMPERATURE: ////
 
-	// Measure and record ground temperature
 	SPI_write(CTRL_MEAS, BMP280_SETUP_CTRL | BMP280_MODE_FORCED);
 	_delay_ms(10);
 	temperature_raw = SPI_read_rawdata(TEMPERATURE);
 	EEPROM_write_word(EEPROM_ADDRESS_GROUND_TEMP, temperature_raw);
 
-	// Make NVM writting initial address = 00h
-	eeprom_adr = eeprom_initial_adr;
+	//// START PRESSURE MONITORING, RECORDING AND PROCESSING: ////
 
+	eeprom_adr = eeprom_initial_adr; // initial address -> 0;
 	rawdata_readout_cycle(&eeprom_adr);
 
+	//// PREPARE FOR SHUTDOWN: ////
+
+	// Deactivate TIMER1
+	TCCR1 &= ~_BV(CS10);
+
+	// Flush arrays that have no more use
 	free(array_window_landing);
 	free(window_samples_timestamps);
 	free(window_avg_press_change_rates);
 
-	cli();
-	TCCR1 &= ~_BV(CS10); // Deactivate TIMER1
-
+	// Save last NVM position to contain pressure data
 	eeprom_final_adr = eeprom_adr;
 	#ifdef TEST_MODE
 	EEPROM_write_word(EEPROM_ADDRESS_LAST, eeprom_final_adr);
 	#endif
 
-	// Save samples used in ascent detection to NVM;
+	// Save samples used in ascent detection to NVM
 	eeprom_adr = eeprom_initial_adr;
 	for(i = 0; i < WINDOW_SIZE_ASCENT_DETECTION; i++)
 	{
@@ -939,7 +945,7 @@ int main (void)
 	free(array_window_ascension);
 	free(array_window_ground);
 
-	// Calculate apogee pressure and record it to NVM
+	// Determine apogee pressure and record it to NVM
 	for(eeprom_adr = eeprom_initial_adr; eeprom_adr < eeprom_final_adr; eeprom_adr += 2)
 	{
 		eeprom_data = EEPROM_read_word(eeprom_adr);
@@ -955,7 +961,7 @@ int main (void)
 	// Store BMP280's calibration constants into NVM
 	EEPROM_store_calib_data();
 
-///////////////////// AUTO POWER DOWN /////////////////////////////////////////////////////////////////
+	//// AUTO POWER DOWN: ////
 
 	LED_sign(); //For the sake of testing, so that I know when the altimeter reached the end of the flow.
 
