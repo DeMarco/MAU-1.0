@@ -807,7 +807,8 @@ void rawdata_readout_cycle (uint16_t *eeprom_address)
 									if(!en_flags.low_freq_sampling_rate && !en_flags.sampl_rate_reduc_not_needed)
 									{
 										// Calculate if landing is expected within the available remaining NVM slots at current sampling rate:
-										remaining_EEPROM_time = CYCLE_DURATION_HF * ((EEPROM_ADDRESS_DATA_MAX - *eeprom_address - 2) / 2); // *eeprom_address - 2 = current address
+										// eeprom_address - 2 is the current address
+										remaining_EEPROM_time = CYCLE_DURATION_HF * ((EEPROM_ADDRESS_DATA_MAX - *eeprom_address - 2) / 2);
 										probable_descent_time = abs(pressure_raw - average_ground) / avg_press_change_rate;
 
 										#ifdef TEST_MODE
