@@ -557,7 +557,7 @@ ISR(TIMER1_OVF_vect)
 	}
 }
 
-////////////////////////////// MAIN FUNCTIONS //////////////////////////////////
+////////////////// PRESSURE CONTINUOUS SAMPLING FUNCTION ///////////////////////
 
 void rawdata_readout_cycle (uint16_t *eeprom_address)
 {
@@ -903,7 +903,11 @@ int main (void)
 
 	//// CALCULATE AND REPORT RECORDED FLIGHT APOGEE: ////
 
+	#ifndef TEST_MODE
+	#ifndef FLIGHT_SIM
 	report_apogee();
+	#endif
+	#endif
 
 	//// ALLOW TIME FOR INSTALLING ALTIMETER IN THE ROCKET: ////
 	delay_60s();
