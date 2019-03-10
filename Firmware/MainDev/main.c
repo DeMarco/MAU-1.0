@@ -715,7 +715,6 @@ void rawdata_readout_cycle (uint16_t *eeprom_address)
 								// Switch to Record flight data + Detect landing;
 								SPI_write(CONFIG, BMP280_FILTER_DISABLED);
 								en_flags.rawdata_record = ENABLED;
-								*eeprom_address += (WINDOW_SIZE_ASCENT_DETECTION * 2);
 								process_type = DETECT_LANDING;
 								count = 0;
 
@@ -921,7 +920,9 @@ int main (void)
 
 	//// START PRESSURE MONITORING, RECORDING AND PROCESSING: ////
 
-	eeprom_adr = eeprom_initial_adr; // initial address -> 0;
+	eeprom_adr = WINDOW_SIZE_ASCENT_DETECTION * 2; // The first time a sample will be recorded is after ascent has been detected,
+																								 // which uses a window of 4 samples that will be only on RAM until the end of
+																								 // the flight, after which it can be fixed to the NVM in its first 4 slots.
 	rawdata_readout_cycle(&eeprom_adr);
 
 	//// PREPARE FOR SHUTDOWN: ////
