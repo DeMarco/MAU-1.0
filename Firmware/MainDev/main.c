@@ -5,7 +5,7 @@
  * Author : Draycon
  */
 
-//#define	TEST_MODE
+#define	TEST_MODE
 //#define FLIGHT_SIM
 //#define	FIXED_TEMPERATURE
 
@@ -39,13 +39,11 @@ volatile struct
 {
 	uint8_t rawdata_readout: 1;
 	uint8_t rawdata_record: 1;
-	uint8_t infinite_readout_cycles: 1;
 	uint8_t low_freq_sampling_rate: 1;
 	uint8_t sampl_rate_reduc_not_needed: 1;
 }
 en_flags;
 
-uint8_t rawdata_readout_cycles_number = 0;
 uint16_t calib_data_temp[3], calib_data_press[9];
 int32_t t_fine;
 uint16_t *array_window_landing = 0, *array_window_ascension = 0, *array_window_ground = 0;
@@ -509,13 +507,13 @@ void ioinit (void)
 	USICR = _BV(USIWM0) | _BV(USICS1) | _BV(USICLK);
 
 	// Enable TIMER 1 Overflow Interrupt
-    TIMSK = _BV(TOIE1);
+  TIMSK = _BV(TOIE1);
 }
 
 ISR(TIMER1_OVF_vect)
 {
 	static uint16_t scaler = POST_SCALER_BEGIN_CYCLE_HF + 1;
-	static uint8_t cycle_count = 0;
+	//static uint8_t cycle_count = 0;
 
 	if(en_flags.rawdata_readout)
 	{
@@ -538,15 +536,6 @@ ISR(TIMER1_OVF_vect)
 				break;
 			case 0:
 				output_low(LED);
-				if(++cycle_count == rawdata_readout_cycles_number)
-				{
-					cycle_count = 0;
-					if(!en_flags.infinite_readout_cycles)
-					{
-						int_flags.readout_cycle_state = CYCLES_FULL;
-						en_flags.rawdata_readout = FALSE;
-					}
-				}
 				if(en_flags.low_freq_sampling_rate)
 					scaler = POST_SCALER_BEGIN_CYCLE_LF + 1;
 				else
@@ -919,20 +908,14 @@ int main (void)
 	sei();
 
 	// Detect ascent + Calculate and record ground average pressure in NVM;
-	rawdata_readout_cycles_number = WINDOW_SIZE_GROUND_PRESS_CALC + WINDOW_SIZE_ASCENT_DETECTION;
-	en_flags.infinite_readout_cycles = TRUE;
 	en_flags.rawdata_readout = TRUE;
-	//en_flags.rawdata_record = TRUE; ///TO BE DELETED
 	rawdata_readout_cycle(&eeprom_adr, DETECT_ASCENSION);
 
 	// Record flight data + Detect landing;
 	SPI_write(CONFIG, BMP280_FILTER_DISABLED);
-	rawdata_readout_cycles_number = MAX_SAMPLE_AMOUNT;
 	en_flags.rawdata_record = TRUE;
-	en_flags.infinite_readout_cycles = FALSE;
 	en_flags.rawdata_readout = TRUE;
 	eeprom_adr += (WINDOW_SIZE_ASCENT_DETECTION * 2);
-	//rawdata_readout_cycle(&eeprom_adr, NO_PROCESSING);
 	rawdata_readout_cycle(&eeprom_adr, DETECT_LANDING);
 	free(array_window_landing);
 	free(window_samples_timestamps);

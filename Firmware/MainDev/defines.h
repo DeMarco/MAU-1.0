@@ -135,12 +135,8 @@
 /* Timer Setup */
 #define TIMER1_FULL_VALUE	256UL
 
-//#define MAX_FLIGHT_TIME					48 //in seconds, MAX = 46.272 ///OBSOLETE
-//#define BMP280_MAX_CYCLE_COUNT			(MAX_FLIGHT_TIME / CYCLE_DURATION) /// OBSOLETE
-#define MAX_SAMPLE_AMOUNT 							240
 #define WINDOW_SIZE_ASCENT_DETECTION		4
 #define WINDOW_SIZE_GROUND_PRESS_CALC		16
-//#define WINDOW_SIZE_LANDING_DETECTION		20 //Aproximately 4 seconds --> ///became a variable
 
 #define ROCKET_ASSEMBLY_DELAY						10 //in seconds
 
@@ -151,7 +147,6 @@
 #define EEPROM_WRITE_INSTANT	0.132
 #define PROCESS_INSTANT				0.082
 #define CONTROL_LED_INSTANT		0.010
-//#define LED_OFF_INSTANT			0.072 ///OBSOLETE
 
 /* TIMER1 post scaler calculation */
 #define _PS(instant)	(uint16_t)((instant * F_CPU) / TIMER1_FULL_VALUE)
@@ -171,7 +166,6 @@
 #define STORE_NVM	3
 #define PROCESS		4
 #define CONTROL_LED	5
-#define CYCLES_FULL	6
 
 /* Process names used during the sampling cycle */
 #define NO_PROCESSING				0
