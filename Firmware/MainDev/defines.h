@@ -2,11 +2,14 @@
 #define DEFINES_H_
 
 /* General definitions */
-#define HIGH	1
-#define LOW		0
+#define HIGH			1
+#define LOW				0
 
-#define TRUE	1
-#define FALSE	0
+#define TRUE			1
+#define FALSE			0
+
+#define ENABLED		1
+#define DISABLED	0
 
 #define output_high(pin)		PORTB |= _BV(pin)
 #define output_low(pin)			PORTB &= ~_BV(pin)
@@ -169,7 +172,6 @@
 
 /* Process names used during the sampling cycle */
 #define NO_PROCESSING				0
-#define MEASURE_GROUND_PRESSURE		1
 #define DETECT_ASCENSION			2
 #define DETECT_LANDING				3
 

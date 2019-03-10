@@ -5,9 +5,13 @@
  * Author : Draycon
  */
 
+////////////////////////////// OPERATION MODES /////////////////////////////////
+
 #define	TEST_MODE
 //#define FLIGHT_SIM
 //#define	FIXED_TEMPERATURE
+
+///////////////////////////////// LIBRARIES ////////////////////////////////////
 
 #include "defines.h"
 
@@ -29,6 +33,8 @@
 #include "FlightProfile_500.h"
 #endif
 
+////////////////////////////// GLOBAL VARIABLES ////////////////////////////////
+
 volatile struct
 {
 	uint8_t readout_cycle_state: 3;
@@ -44,14 +50,16 @@ volatile struct
 }
 en_flags;
 
+// BMP280 Calibration related
 uint16_t calib_data_temp[3], calib_data_press[9];
 int32_t t_fine;
+
+// Window arrays
 uint16_t *array_window_landing = 0, *array_window_ascension = 0, *array_window_ground = 0;
 float *window_avg_press_change_rates = 0;
 float *window_samples_timestamps = 0;
 
-
-// AUXILIARY FUNCTIONS //
+//////////////////////////// AUXILIARY FUNCTIONS ///////////////////////////////
 
 void delay_1s (void)
 {
@@ -333,6 +341,37 @@ void EEPROM_store_calib_data(void)
 	}
 }
 
+void bmp280_init (void)
+{
+	// Setup BMP280
+	SPI_write(CONFIG, BMP280_SETUP_CONFIG);
+	SPI_write(CTRL_MEAS, BMP280_SETUP_CTRL);
+
+	// Read calibration constants from BMP280's internal memory
+	SPI_read_calib_data();
+}
+
+void ioinit (void)
+{
+	// Activate TIMER 1 using system main clock
+	TCCR1 = _BV(CS10);
+
+	// Set pins DO, USCK, LED and CSB as outputs, and DI as input
+	DDRB = (_BV(DO) | _BV(USCK) | _BV(LED) | _BV(CSB)) & ~_BV(DI);
+
+	// Set Universal Serial Interface for SPI (Three Wire mode) and SPI mode 00;
+	output_low(CSB);  //Start with CSB OFF in order to fix BMP280 to SPI mode;
+	_delay_ms(10);    //Wait 10 ms
+	output_high(CSB); //Activate CSB and keep it ON (condition to initiate new transmissions);
+	output_low(USCK); //UCSK to OFF and keep it (so that BMP280 will be keept in SPI mode 00)
+	USICR = _BV(USIWM0) | _BV(USICS1) | _BV(USICLK);
+
+	// Enable TIMER 1 Overflow Interrupt
+  TIMSK = _BV(TOIE1);
+}
+
+//////////////////////// APOGEE CALCULATION FUNCTIONS //////////////////////////
+
 // Returns temperature in degC. Example: output value T = 5123 corresponds to 51.23 degC.
 // t_fine carries the temperature value as used for pressure compensation.
 int32_t bmp280_compensate_temp(int32_t t_raw)
@@ -481,34 +520,7 @@ void report_apogee (void)
 	}
 }
 
-void bmp280_init (void)
-{
-	// Setup BMP280
-	SPI_write(CONFIG, BMP280_SETUP_CONFIG);
-	SPI_write(CTRL_MEAS, BMP280_SETUP_CTRL);
-
-	// Read calibration constants from BMP280's internal memory
-	SPI_read_calib_data();
-}
-
-void ioinit (void)
-{
-	// Activate TIMER 1 using system main clock
-	TCCR1 = _BV(CS10);
-
-	// Set pins DO, USCK, LED and CSB as outputs, and DI as input
-	DDRB = (_BV(DO) | _BV(USCK) | _BV(LED) | _BV(CSB)) & ~_BV(DI);
-
-	// Set Universal Serial Interface for SPI (Three Wire mode) and SPI mode 00;
-	output_low(CSB);  //Start with CSB OFF in order to fix BMP280 to SPI mode;
-	_delay_ms(10);    //Wait 10 ms
-	output_high(CSB); //Activate CSB and keep it ON (condition to initiate new transmissions);
-	output_low(USCK); //UCSK to OFF and keep it (so that BMP280 will be keept in SPI mode 00)
-	USICR = _BV(USIWM0) | _BV(USICS1) | _BV(USICLK);
-
-	// Enable TIMER 1 Overflow Interrupt
-  TIMSK = _BV(TOIE1);
-}
+////////////////////////// TIMER INTERRUPT HANDLER /////////////////////////////
 
 ISR(TIMER1_OVF_vect)
 {
@@ -545,7 +557,9 @@ ISR(TIMER1_OVF_vect)
 	}
 }
 
-void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
+////////////////////////////// MAIN FUNCTIONS //////////////////////////////////
+
+void rawdata_readout_cycle (uint16_t *eeprom_address)
 {
 	uint32_t pressure_raw = 0;
 	uint8_t count = 0;
@@ -554,32 +568,31 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 	int32_t numerator = 0;
 	int32_t numerator_ground = 0;
 	int32_t average = 0;
-	static int32_t average_ground = 0; //static, so the value is not flushed when the ascent detection process is finished
+	int32_t average_ground = 0;
 	int32_t variance = 0;
 	int32_t term = 0;
-	int32_t window_size_landing_detection = 20;
 	float avg_press_change_rate = 0.0;
-	static float sample_timestamp = 0.0;
+	float sample_timestamp = 0.0;
 	float remaining_EEPROM_time = 0.0;
 	float probable_descent_time = 0.0;
+	uint8_t window_size_landing_detection = 20;
+	uint8_t process_type = DETECT_ASCENSION;
 
 	#ifdef FLIGHT_SIM
 	static uint16_t flight_profile_index = 0;
 	#endif
 
-	switch(process_type)
-	{
-		case DETECT_ASCENSION:
-			array_window_ascension = malloc(2*WINDOW_SIZE_ASCENT_DETECTION);
-			array_window_ground = malloc(2*(WINDOW_SIZE_GROUND_PRESS_CALC + WINDOW_SIZE_ASCENT_DETECTION));
-			break;
+	array_window_ascension = malloc(2*WINDOW_SIZE_ASCENT_DETECTION);
+	array_window_ground = malloc(2*(WINDOW_SIZE_GROUND_PRESS_CALC + WINDOW_SIZE_ASCENT_DETECTION));
+	array_window_landing = malloc(2*window_size_landing_detection);
+	window_samples_timestamps = malloc(sizeof(float)*window_size_landing_detection);
+	window_avg_press_change_rates = malloc(sizeof(float)*window_size_landing_detection);
 
-		case DETECT_LANDING:
-			array_window_landing = malloc(2*window_size_landing_detection);
-			window_samples_timestamps = malloc(sizeof(float)*window_size_landing_detection);
-			window_avg_press_change_rates = malloc(sizeof(float)*window_size_landing_detection);
-			break;
-	}
+	// Detect ascent + Calculate and record ground average pressure in NVM;
+	en_flags.rawdata_readout = ENABLED;
+
+	// Enable global interrupts
+	sei();
 
 	while(en_flags.rawdata_readout)
 	{
@@ -611,7 +624,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 																		//the NVM, but of course causing the overwrite
 																		//of contents everytime the address reached
 																		//its maximum allowed value.
-						en_flags.rawdata_readout = FALSE; //This line ensures the altimeter
+						en_flags.rawdata_readout = DISABLED; //This line ensures the altimeter
 																							//will stop recording once the
 																							//NVM is full.
 					}
@@ -651,6 +664,9 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 						}
 						else
 						{
+							numerator = 0;
+							variance = 0;
+
 							// CALCULATE GROUND AVERAGE PRESSURE
 							numerator_ground = 0;
 							for(i = 1; i < (WINDOW_SIZE_GROUND_PRESS_CALC + WINDOW_SIZE_ASCENT_DETECTION); i++)
@@ -681,8 +697,6 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 							// IF ASCENT IS DETECTED:
 							if(variance > MIN_VARIANCE_ASCENSION_DETECT)
 							{
-								en_flags.rawdata_readout = FALSE;
-
 								// Record ground pressure in NVM:
 								cli();
 								EEPROM_write_word(EEPROM_ADDRESS_PRESS_GROUND, average_ground);
@@ -697,10 +711,15 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 								//EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_1, variance);
 								sei();
 								#endif
+
+								// Switch to Record flight data + Detect landing;
+								SPI_write(CONFIG, BMP280_FILTER_DISABLED);
+								en_flags.rawdata_record = ENABLED;
+								*eeprom_address += (WINDOW_SIZE_ASCENT_DETECTION * 2);
+								process_type = DETECT_LANDING;
+								count = 0;
+
 							}
-							numerator = 0;
-							average = 0;
-							variance = 0;
 						}
 						break;
 
@@ -737,6 +756,9 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 						// Now the actual variance calculation can start using those values.
 						else
 						{
+							numerator = 0;
+							variance = 0;
+
 							// Continue to register pressure samples and calculate change rates:
 							for(i=1; i < window_size_landing_detection; i++)
 							{
@@ -769,7 +791,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 								// Check if pressure change rate is close to zero, indicating that landing already occurred:
 								if(avg_press_change_rate <= 1) //avg_press_change_rate is absolute, thus never below zero.
 								{
-									en_flags.rawdata_readout = FALSE;
+									en_flags.rawdata_readout = DISABLED;
 
 									#ifdef TEST_MODE
 									cli();
@@ -808,10 +830,6 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 									}
 								}
 							}
-							numerator = 0;
-							average = 0;
-							variance = 0;
-
 						}
 						break;
 				}
@@ -833,14 +851,6 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 								output_high(LED);
 								cycle_count_LED = 0;
 							}
-						}
-						break;
-
-					case MEASURE_GROUND_PRESSURE:
-						if(++cycle_count_LED == 2)
-						{
-							output_high(LED);
-							cycle_count_LED = 0;
 						}
 						break;
 
@@ -873,9 +883,10 @@ int main (void)
 
 	// Flags initialization
 	int_flags.readout_cycle_state = DO_NOTHING;
-	en_flags.rawdata_readout = FALSE;
-	en_flags.rawdata_record = FALSE;
+	en_flags.rawdata_readout = DISABLED;
+	en_flags.rawdata_record = DISABLED;
 	en_flags.low_freq_sampling_rate = FALSE;
+	en_flags.sampl_rate_reduc_not_needed = FALSE;
 
 	// Misc
 	uint8_t i = 0;
@@ -904,19 +915,8 @@ int main (void)
 	// Make NVM writting initial address = 00h
 	eeprom_adr = eeprom_initial_adr;
 
-	// Enable global interrupts
-	sei();
+	rawdata_readout_cycle(&eeprom_adr);
 
-	// Detect ascent + Calculate and record ground average pressure in NVM;
-	en_flags.rawdata_readout = TRUE;
-	rawdata_readout_cycle(&eeprom_adr, DETECT_ASCENSION);
-
-	// Record flight data + Detect landing;
-	SPI_write(CONFIG, BMP280_FILTER_DISABLED);
-	en_flags.rawdata_record = TRUE;
-	en_flags.rawdata_readout = TRUE;
-	eeprom_adr += (WINDOW_SIZE_ASCENT_DETECTION * 2);
-	rawdata_readout_cycle(&eeprom_adr, DETECT_LANDING);
 	free(array_window_landing);
 	free(window_samples_timestamps);
 	free(window_avg_press_change_rates);
