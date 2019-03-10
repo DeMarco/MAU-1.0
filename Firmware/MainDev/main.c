@@ -7,7 +7,7 @@
 
 ////////////////////////////// OPERATION MODES /////////////////////////////////
 
-#define	TEST_MODE
+//#define	TEST_MODE
 //#define FLIGHT_SIM
 //#define	FIXED_TEMPERATURE
 
@@ -902,7 +902,7 @@ int main (void)
 
 	//// CALCULATE AND REPORT RECORDED FLIGHT APOGEE: ////
 
-	//report_apogee();
+	report_apogee();
 
 	//// ALLOW TIME FOR INSTALLING ALTIMETER IN THE ROCKET: ////
 	delay_60s();

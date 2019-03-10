@@ -141,7 +141,7 @@
 #define WINDOW_SIZE_ASCENT_DETECTION		4
 #define WINDOW_SIZE_GROUND_PRESS_CALC		16
 
-#define ROCKET_ASSEMBLY_DELAY						10 //in seconds
+#define ROCKET_ASSEMBLY_DELAY						60 //in seconds
 
 #define CYCLE_DURATION_LF			1		  //in seconds
 #define CYCLE_DURATION_HF			0.192 //in seconds
