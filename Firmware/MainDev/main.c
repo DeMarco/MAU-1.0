@@ -5,8 +5,13 @@
  * Author : Draycon
  */
 
+////////////////////////////// OPERATION MODES /////////////////////////////////
+
 //#define	TEST_MODE
+//#define FLIGHT_SIM
 //#define	FIXED_TEMPERATURE
+
+///////////////////////////////// LIBRARIES ////////////////////////////////////
 
 #include "defines.h"
 
@@ -22,6 +27,14 @@
 
 #include "AtmosModel_100_v3.h"
 
+#ifdef FLIGHT_SIM
+//#include "FlightProfile_Urano.h"
+//#include "FlightProfile_130.h"
+#include "FlightProfile_500.h"
+#endif
+
+////////////////////////////// GLOBAL VARIABLES ////////////////////////////////
+
 volatile struct
 {
 	uint8_t readout_cycle_state: 3;
@@ -32,17 +45,21 @@ volatile struct
 {
 	uint8_t rawdata_readout: 1;
 	uint8_t rawdata_record: 1;
-	uint8_t infinite_readout_cycles: 1;
+	uint8_t low_freq_sampling_rate: 1;
+	uint8_t sampl_rate_reduc_not_needed: 1;
 }
 en_flags;
 
-uint8_t rawdata_readout_cycles_number = 0;
+// BMP280 Calibration related
 uint16_t calib_data_temp[3], calib_data_press[9];
 int32_t t_fine;
+
+// Window arrays
 uint16_t *array_window_landing = 0, *array_window_ascension = 0, *array_window_ground = 0;
+float *window_avg_press_change_rates = 0;
+float *window_samples_timestamps = 0;
 
-
-// AUXILIARY FUNCTIONS //
+//////////////////////////// AUXILIARY FUNCTIONS ///////////////////////////////
 
 void delay_1s (void)
 {
@@ -56,7 +73,7 @@ void delay_60s (void)
 {
 	uint8_t i;
 
-	for (i = 0; i < CYCLE_START_DELAY; i++)
+	for (i = 0; i < ROCKET_ASSEMBLY_DELAY; i++)
 		delay_1s();
 }
 
@@ -324,6 +341,37 @@ void EEPROM_store_calib_data(void)
 	}
 }
 
+void bmp280_init (void)
+{
+	// Setup BMP280
+	SPI_write(CONFIG, BMP280_SETUP_CONFIG);
+	SPI_write(CTRL_MEAS, BMP280_SETUP_CTRL);
+
+	// Read calibration constants from BMP280's internal memory
+	SPI_read_calib_data();
+}
+
+void ioinit (void)
+{
+	// Activate TIMER 1 using system main clock
+	TCCR1 = _BV(CS10);
+
+	// Set pins DO, USCK, LED and CSB as outputs, and DI as input
+	DDRB = (_BV(DO) | _BV(USCK) | _BV(LED) | _BV(CSB)) & ~_BV(DI);
+
+	// Set Universal Serial Interface for SPI (Three Wire mode) and SPI mode 00;
+	output_low(CSB);  //Start with CSB OFF in order to fix BMP280 to SPI mode;
+	_delay_ms(10);    //Wait 10 ms
+	output_high(CSB); //Activate CSB and keep it ON (condition to initiate new transmissions);
+	output_low(USCK); //UCSK to OFF and keep it (so that BMP280 will be keept in SPI mode 00)
+	USICR = _BV(USIWM0) | _BV(USICS1) | _BV(USICLK);
+
+	// Enable TIMER 1 Overflow Interrupt
+  TIMSK = _BV(TOIE1);
+}
+
+//////////////////////// APOGEE CALCULATION FUNCTIONS //////////////////////////
+
 // Returns temperature in degC. Example: output value T = 5123 corresponds to 51.23 degC.
 // t_fine carries the temperature value as used for pressure compensation.
 int32_t bmp280_compensate_temp(int32_t t_raw)
@@ -472,39 +520,12 @@ void report_apogee (void)
 	}
 }
 
-void bmp280_init (void)
-{
-	// Setup BMP280
-	SPI_write(CONFIG, BMP280_SETUP_CONFIG);
-	SPI_write(CTRL_MEAS, BMP280_SETUP_CTRL);
-
-	// Read calibration constants from BMP280's internal memory
-	SPI_read_calib_data();
-}
-
-void ioinit (void)
-{
-	// Activate TIMER 1 using system main clock
-	TCCR1 = _BV(CS10);
-
-	// Set pins DO, USCK, LED and CSB as outputs, and DI as input
-	DDRB = (_BV(DO) | _BV(USCK) | _BV(LED) | _BV(CSB)) & ~_BV(DI);
-
-	// Set Universal Serial Interface for SPI (Three Wire mode) and SPI mode 00;
-	output_low(CSB);  //Start with CSB OFF in order to fix BMP280 to SPI mode;
-	_delay_ms(10);    //Wait 10 ms
-	output_high(CSB); //Activate CSB and keep it ON (condition to initiate new transmissions);
-	output_low(USCK); //UCSK to OFF and keep it (so that BMP280 will be keept in SPI mode 00)
-	USICR = _BV(USIWM0) | _BV(USICS1) | _BV(USICLK);
-
-	// Enable TIMER 1 Overflow Interrupt
-    TIMSK = _BV(TOIE1);
-}
+////////////////////////// TIMER INTERRUPT HANDLER /////////////////////////////
 
 ISR(TIMER1_OVF_vect)
 {
-	static uint16_t scaler = POST_SCALER_MEASUREMENT + 1;
-	static uint8_t cycle_count = 0;
+	static uint16_t scaler = POST_SCALER_BEGIN_CYCLE_HF + 1;
+	//static uint8_t cycle_count = 0;
 
 	if(en_flags.rawdata_readout)
 	{
@@ -527,45 +548,51 @@ ISR(TIMER1_OVF_vect)
 				break;
 			case 0:
 				output_low(LED);
-				if(++cycle_count == rawdata_readout_cycles_number)
-				{
-					cycle_count = 0;
-					if(!en_flags.infinite_readout_cycles)
-					{
-						int_flags.readout_cycle_state = CYCLES_FULL;
-						en_flags.rawdata_readout = FALSE;
-					}
-				}
-				scaler = POST_SCALER_MEASUREMENT + 1;
+				if(en_flags.low_freq_sampling_rate)
+					scaler = POST_SCALER_BEGIN_CYCLE_LF + 1;
+				else
+					scaler = POST_SCALER_BEGIN_CYCLE_HF + 1;
 				break;
 		}
 	}
 }
 
-void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
+////////////////// PRESSURE CONTINUOUS SAMPLING FUNCTION ///////////////////////
+
+void rawdata_readout_cycle (uint16_t *eeprom_address)
 {
 	uint32_t pressure_raw = 0;
 	uint8_t count = 0;
 	uint8_t i = 0;
 	uint8_t cycle_count_LED = 0;
-	uint32_t numerator = 0;
-	uint32_t numerator_ground = 0;
+	int32_t numerator = 0;
+	int32_t numerator_ground = 0;
 	int32_t average = 0;
 	int32_t average_ground = 0;
 	int32_t variance = 0;
 	int32_t term = 0;
+	float avg_press_change_rate = 0.0;
+	float sample_timestamp = 0.0;
+	float remaining_EEPROM_time = 0.0;
+	float probable_descent_time = 0.0;
+	uint8_t window_size_landing_detection = 20;
+	uint8_t process_type = DETECT_ASCENSION;
 
-	switch(process_type)
-	{
-		case DETECT_ASCENSION:
-			array_window_ascension = malloc(2*BMP280_CYCLES_NUM_ASCENSION);
-			array_window_ground = malloc(2*(BMP280_CYCLES_NUM_GROUND + BMP280_CYCLES_NUM_ASCENSION));
-			break;
+	#ifdef FLIGHT_SIM
+	static uint16_t flight_profile_index = 0;
+	#endif
 
-		case DETECT_LANDING:
-			array_window_landing = malloc(2*BMP280_CYCLES_NUM_LANDED);
-			break;
-	}
+	array_window_ascension = malloc(2*WINDOW_SIZE_ASCENT_DETECTION);
+	array_window_ground = malloc(2*(WINDOW_SIZE_GROUND_PRESS_CALC + WINDOW_SIZE_ASCENT_DETECTION));
+	array_window_landing = malloc(2*window_size_landing_detection);
+	window_samples_timestamps = malloc(sizeof(float)*window_size_landing_detection);
+	window_avg_press_change_rates = malloc(sizeof(float)*window_size_landing_detection);
+
+	// Detect ascent + Calculate and record ground average pressure in NVM;
+	en_flags.rawdata_readout = ENABLED;
+
+	// Enable global interrupts
+	sei();
 
 	while(en_flags.rawdata_readout)
 	{
@@ -577,7 +604,13 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 				break;
 
 			case READ_OUT:
+				#ifdef FLIGHT_SIM
+				pressure_raw = pgm_read_word(&pressure_samples[flight_profile_index]);
+				flight_profile_index++;
+				#else
 				pressure_raw = SPI_read_rawdata(PRESSURE);
+				#endif
+
 				int_flags.readout_cycle_state = DO_NOTHING;
 				break;
 
@@ -591,7 +624,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 																		//the NVM, but of course causing the overwrite
 																		//of contents everytime the address reached
 																		//its maximum allowed value.
-						en_flags.rawdata_readout = FALSE; //This line ensures the altimeter
+						en_flags.rawdata_readout = DISABLED; //This line ensures the altimeter
 																							//will stop recording once the
 																							//NVM is full.
 					}
@@ -607,55 +640,63 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 				break;
 
 			case PROCESS:
+				// Register the timestamp of the sample:
+				if(en_flags.low_freq_sampling_rate)
+					sample_timestamp += CYCLE_DURATION_LF;
+				else
+					sample_timestamp += CYCLE_DURATION_HF;
+
+				// Do process:
 				switch(process_type)
 				{
 					case NO_PROCESSING:
 						break;
 
 					case DETECT_ASCENSION:
-						if(count < (BMP280_CYCLES_NUM_GROUND + BMP280_CYCLES_NUM_ASCENSION))
+						if(count < (WINDOW_SIZE_GROUND_PRESS_CALC + WINDOW_SIZE_ASCENT_DETECTION))
 						{
 							array_window_ground[count] = pressure_raw;
-							if(count >= BMP280_CYCLES_NUM_GROUND)
+							if(count >= WINDOW_SIZE_GROUND_PRESS_CALC)
 							{
-								array_window_ascension[count - BMP280_CYCLES_NUM_GROUND] = pressure_raw;
+								array_window_ascension[count - WINDOW_SIZE_GROUND_PRESS_CALC] = pressure_raw;
 							}
 							count++;
 						}
 						else
 						{
+							numerator = 0;
+							variance = 0;
+
 							// CALCULATE GROUND AVERAGE PRESSURE
 							numerator_ground = 0;
-							for(i = 1; i < (BMP280_CYCLES_NUM_GROUND + BMP280_CYCLES_NUM_ASCENSION); i++)
+							for(i = 1; i < (WINDOW_SIZE_GROUND_PRESS_CALC + WINDOW_SIZE_ASCENT_DETECTION); i++)
 							{
 								array_window_ground[i-1] = array_window_ground[i];
-								if(i <= BMP280_CYCLES_NUM_GROUND)
+								if(i <= WINDOW_SIZE_GROUND_PRESS_CALC)
 									numerator_ground += array_window_ground[i-1];
 							}
 							array_window_ground[i-1] = pressure_raw;
-							average_ground = numerator_ground / BMP280_CYCLES_NUM_GROUND;
+							average_ground = numerator_ground / WINDOW_SIZE_GROUND_PRESS_CALC;
 
 							// CALCULATE PRESSURE VARIANCE FOR ASCENT DETECTION
-							for(i = 1; i < BMP280_CYCLES_NUM_ASCENSION; i++)
+							for(i = 1; i < WINDOW_SIZE_ASCENT_DETECTION; i++)
 							{
 								array_window_ascension[i-1] = array_window_ascension[i];
 								numerator += array_window_ascension[i];
 							}
 							array_window_ascension[i-1] = pressure_raw;
 							numerator += pressure_raw;
-							average = numerator / BMP280_CYCLES_NUM_ASCENSION;
-							for(i = 0; i < BMP280_CYCLES_NUM_ASCENSION; i++)
+							average = numerator / WINDOW_SIZE_ASCENT_DETECTION;
+							for(i = 0; i < WINDOW_SIZE_ASCENT_DETECTION; i++)
 							{
 								term = array_window_ascension[i] - average;
 								variance += term*term;
 							}
-							variance /= BMP280_CYCLES_NUM_ASCENSION;
+							variance /= WINDOW_SIZE_ASCENT_DETECTION;
 
 							// IF ASCENT IS DETECTED:
 							if(variance > MIN_VARIANCE_ASCENSION_DETECT)
 							{
-								en_flags.rawdata_readout = FALSE;
-
 								// Record ground pressure in NVM:
 								cli();
 								EEPROM_write_word(EEPROM_ADDRESS_PRESS_GROUND, average_ground);
@@ -665,55 +706,132 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 								//Instead of forcing the first sample to zero meters, shouldn't all smples be
 								//offsetted according to: sample[0] +/- average ?
 
-								#ifdef TEST_MODE
+								/*#ifdef TEST_MODE
 								cli();
 								EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_1, variance);
 								sei();
-								#endif
+								#endif*/
+
+								// Switch to Record flight data + Detect landing;
+								SPI_write(CONFIG, BMP280_FILTER_DISABLED);
+								en_flags.rawdata_record = ENABLED;
+								process_type = DETECT_LANDING;
+								count = 0;
+
 							}
-							numerator = 0;
-							average = 0;
-							variance = 0;
 						}
 						break;
 
 					case DETECT_LANDING:
-						if(count < BMP280_CYCLES_NUM_LANDED)
+						// First, fulfill the window with its first 20 samples
+						if(count < window_size_landing_detection)
 						{
-							numerator += pressure_raw;
 							array_window_landing[count] = pressure_raw;
+							window_samples_timestamps[count] = sample_timestamp;
+
 							count++;
 						}
-						else
+						// From this point on, the window already has at least 20 valid samples.
+						// Now, fulfill the array of calculated pressure change rates with its first 20 values.
+						else if((count >= window_size_landing_detection) && (count < window_size_landing_detection*2))
 						{
-							for(i=1; i < BMP280_CYCLES_NUM_LANDED; i++)
+							// Continue to register pressure samples:
+							for(i=1; i < window_size_landing_detection; i++)
 							{
 								array_window_landing[i-1] = array_window_landing[i];
-								numerator += array_window_landing[i];
+								window_samples_timestamps[i-1] = window_samples_timestamps[i];
 							}
 							array_window_landing[i-1] = pressure_raw;
-							numerator += pressure_raw;
-							average = numerator / BMP280_CYCLES_NUM_LANDED;
-							for(i = 0; i < BMP280_CYCLES_NUM_LANDED; i++)
-							{
-								term = array_window_landing[i] - average;
-								variance += term*term;
-							}
-							variance /= BMP280_CYCLES_NUM_LANDED;
-							if(variance < MAX_VARIANCE_LANDING_DETECT)
-							{
-								en_flags.rawdata_readout = FALSE;
+							window_samples_timestamps[i-1] = sample_timestamp;
 
-								#ifdef TEST_MODE
-								cli();
-								EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_2, variance);
-								sei();
-								#endif
-							}
+							// Calculate and register average pressure change rate with the first and last samples of the window
+							avg_press_change_rate = abs(array_window_landing[window_size_landing_detection-1] - array_window_landing[0])
+														/ (window_samples_timestamps[window_size_landing_detection-1] - window_samples_timestamps[0]);
+							window_avg_press_change_rates[count-window_size_landing_detection] = avg_press_change_rate;
+
+							count++;
+						}
+						// From this point on, the array of calculated pressure change rates has at least 20 valid values.
+						// Now the actual variance calculation can start using those values.
+						else
+						{
 							numerator = 0;
-							average = 0;
 							variance = 0;
 
+							// Continue to register pressure samples and calculate change rates:
+							for(i=1; i < window_size_landing_detection; i++)
+							{
+								array_window_landing[i-1] = array_window_landing[i];
+								window_samples_timestamps[i-1] = window_samples_timestamps[i];
+								window_avg_press_change_rates[i-1] = window_avg_press_change_rates[i];
+								numerator += window_avg_press_change_rates[i];
+							}
+							array_window_landing[i-1] = pressure_raw;
+							window_samples_timestamps[i-1] = sample_timestamp;
+
+							// Calculate and register average pressure change rate with the first and last samples of the window
+							avg_press_change_rate = abs(array_window_landing[window_size_landing_detection-1] - array_window_landing[0])
+														/ (window_samples_timestamps[window_size_landing_detection-1] - window_samples_timestamps[0]);
+							window_avg_press_change_rates[i-1] = avg_press_change_rate;
+							numerator += avg_press_change_rate;
+
+							// Calculate the variance of the pressure change rates:
+							average = numerator / window_size_landing_detection;
+							for(i = 0; i < window_size_landing_detection; i++)
+							{
+								term = window_avg_press_change_rates[i] - average;
+								variance += term*term;
+							}
+							variance /= window_size_landing_detection;
+
+							// Check if variance is below the threshold that indicates parachute descent detected:
+							if(variance < MAX_VARIANCE_PARACHUTE_DETECT)
+							{
+								// Check if pressure change rate is close to zero, indicating that landing already occurred:
+								if(avg_press_change_rate <= 1) //avg_press_change_rate is absolute, thus never below zero.
+								{
+									en_flags.rawdata_readout = DISABLED;
+
+									#ifdef TEST_MODE
+									cli();
+									EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_1, variance);
+									EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_2, (int32_t)avg_press_change_rate);
+									sei();
+									#endif
+
+									// After this point, the loop is broken and the program returns to main();
+								}
+								else
+								{
+									if(!en_flags.low_freq_sampling_rate && !en_flags.sampl_rate_reduc_not_needed)
+									{
+										// Calculate if landing is expected within the available remaining NVM slots at current sampling rate:
+										// eeprom_address - 2 is the current address
+										remaining_EEPROM_time = CYCLE_DURATION_HF * ((EEPROM_ADDRESS_DATA_MAX - *eeprom_address - 2) / 2);
+										probable_descent_time = abs(pressure_raw - average_ground) / avg_press_change_rate;
+
+										#ifdef TEST_MODE
+										cli();
+										EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_3, (int32_t)remaining_EEPROM_time);
+										EEPROM_write_dword(EEPROM_ADDRESS_DEBUG_4, (int32_t)probable_descent_time);
+										sei();
+										#endif
+
+										if(remaining_EEPROM_time > (probable_descent_time + PREDICTED_FLIGHT_TIME_ERROR))
+										{
+											en_flags.sampl_rate_reduc_not_needed = TRUE;
+										}
+										else
+										{
+											en_flags.low_freq_sampling_rate = TRUE;
+											window_size_landing_detection = 5;
+											cli();
+											EEPROM_write_word(EEPROM_ADDRESS_SAMPL_RATE_CHNG, *eeprom_address);
+											sei();
+										}
+									}
+								}
+							}
 						}
 						break;
 				}
@@ -728,21 +846,13 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 						break;
 
 					case DETECT_ASCENSION:
-						if(count > BMP280_CYCLES_NUM_GROUND)
+						if(count > WINDOW_SIZE_GROUND_PRESS_CALC)
 						{
 							if(++cycle_count_LED == 5)
 							{
 								output_high(LED);
 								cycle_count_LED = 0;
 							}
-						}
-						break;
-
-					case MEASURE_GROUND_PRESSURE:
-						if(++cycle_count_LED == 2)
-						{
-							output_high(LED);
-							cycle_count_LED = 0;
 						}
 						break;
 
@@ -754,6 +864,8 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 				break;
 		}
 	}
+
+	cli();
 }
 
 //////////////////////////////////////////////////////////////////
@@ -761,7 +873,7 @@ void rawdata_readout_cycle (uint16_t *eeprom_address, uint8_t process_type)
 //////////////////////////////////////////////////////////////////
 int main (void)
 {
-///////////////////// RUN INITIALIZATIONS /////////////////////////////////////////////////////////////////
+	//// RUN INITIALIZATIONS: ////
 
 	// Temperature and pressure data
 	uint32_t temperature_raw = 0;
@@ -775,8 +887,10 @@ int main (void)
 
 	// Flags initialization
 	int_flags.readout_cycle_state = DO_NOTHING;
-	en_flags.rawdata_readout = FALSE;
-	en_flags.rawdata_record = FALSE;
+	en_flags.rawdata_readout = DISABLED;
+	en_flags.rawdata_record = DISABLED;
+	en_flags.low_freq_sampling_rate = FALSE;
+	en_flags.sampl_rate_reduc_not_needed = FALSE;
 
 	// Misc
 	uint8_t i = 0;
@@ -786,65 +900,58 @@ int main (void)
 
 	//LED_sign(); ///Causes to much confusion as users tend to account this blinking into summing the flashes from apogee reporting.
 
-///////////////////// REPORT RECORDED FLIGHT APOGEE /////////////////////////////////////////////////////////////////
+	//// CALCULATE AND REPORT RECORDED FLIGHT APOGEE: ////
 
+	#ifndef TEST_MODE
+	#ifndef FLIGHT_SIM
 	report_apogee();
+	#endif
+	#endif
 
-///////////////////// ALLOW 60 SECONDS FOR INSTALLING ALTIMETER IN THE ROCKET ///////////////////////////////////////
-
+	//// ALLOW TIME FOR INSTALLING ALTIMETER IN THE ROCKET: ////
 	delay_60s();
 
-///////////////////// MAIN FLOW /////////////////////////////////////////////////////////////////////////////////////
+	//// MEASURE AND RECORD GROUND TEMPERATURE: ////
 
-	// Measure and record ground temperature
 	SPI_write(CTRL_MEAS, BMP280_SETUP_CTRL | BMP280_MODE_FORCED);
 	_delay_ms(10);
 	temperature_raw = SPI_read_rawdata(TEMPERATURE);
 	EEPROM_write_word(EEPROM_ADDRESS_GROUND_TEMP, temperature_raw);
 
-	// Make NVM writting initial address = 00h
-	eeprom_adr = eeprom_initial_adr;
+	//// START PRESSURE MONITORING, RECORDING AND PROCESSING: ////
 
-	// Enable global interrupts
-	sei();
+	eeprom_adr = WINDOW_SIZE_ASCENT_DETECTION * 2; // The first time a sample will be recorded is after ascent has been detected,
+																								 // which uses a window of 4 samples that will be only on RAM until the end of
+																								 // the flight, after which it can be fixed to the NVM in its first 4 slots.
+	rawdata_readout_cycle(&eeprom_adr);
 
-	// Detect ascent + Calculate and record ground average pressure in NVM;
-	rawdata_readout_cycles_number = BMP280_CYCLES_NUM_GROUND + BMP280_CYCLES_NUM_ASCENSION;
-	en_flags.infinite_readout_cycles = TRUE;
-	en_flags.rawdata_readout = TRUE;
-	//en_flags.rawdata_record = TRUE; ///TO BE DELETED
-	rawdata_readout_cycle(&eeprom_adr, DETECT_ASCENSION);
+	//// PREPARE FOR SHUTDOWN: ////
 
-	// Record flight data + Detect landing;
-	SPI_write(CONFIG, BMP280_FILTER_DISABLED);
-	rawdata_readout_cycles_number = BMP280_MAX_CYCLE_COUNT;
-	en_flags.rawdata_record = TRUE;
-	en_flags.infinite_readout_cycles = FALSE;
-	en_flags.rawdata_readout = TRUE;
-	eeprom_adr += (BMP280_CYCLES_NUM_ASCENSION * 2);
-	rawdata_readout_cycle(&eeprom_adr, DETECT_LANDING);
+	// Deactivate TIMER1
+	TCCR1 &= ~_BV(CS10);
+
+	// Flush arrays that have no more use
 	free(array_window_landing);
+	free(window_samples_timestamps);
+	free(window_avg_press_change_rates);
 
-	cli();
-	TCCR1 &= ~_BV(CS10); // Deactivate TIMER1
-
+	// Save last NVM position to contain pressure data
 	eeprom_final_adr = eeprom_adr;
 	#ifdef TEST_MODE
 	EEPROM_write_word(EEPROM_ADDRESS_LAST, eeprom_final_adr);
 	#endif
 
-	// Save samples used in ascent detection to NVM;
+	// Save samples used in ascent detection to NVM
 	eeprom_adr = eeprom_initial_adr;
-	for(i = 0; i < BMP280_CYCLES_NUM_ASCENSION; i++)
+	for(i = 0; i < WINDOW_SIZE_ASCENT_DETECTION; i++)
 	{
 		EEPROM_write_word(eeprom_adr, array_window_ascension[i]);
 		eeprom_adr += 2;
 	}
-
 	free(array_window_ascension);
 	free(array_window_ground);
 
-	// Calculate apogee pressure and record it to NVM
+	// Determine apogee pressure and record it to NVM
 	for(eeprom_adr = eeprom_initial_adr; eeprom_adr < eeprom_final_adr; eeprom_adr += 2)
 	{
 		eeprom_data = EEPROM_read_word(eeprom_adr);
@@ -860,7 +967,7 @@ int main (void)
 	// Store BMP280's calibration constants into NVM
 	EEPROM_store_calib_data();
 
-///////////////////// AUTO POWER DOWN /////////////////////////////////////////////////////////////////
+	//// AUTO POWER DOWN: ////
 
 	LED_sign(); //For the sake of testing, so that I know when the altimeter reached the end of the flow.
 
