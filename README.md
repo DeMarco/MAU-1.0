@@ -3,8 +3,6 @@ View this project on [CADLAB.io](https://cadlab.io/project/1285).
 # MAU-1.0
 First version of MAU - MicroAltímetro Universal - or "Universal MicroAltimeter" (my Final Year Project)
 
-This work, including the circuit and PCB layout files, is protected by GNU GPL v3.0.
-
 Folder structure explained: 
 
 Delivery_Clientes --> basically the files that any customer will need to extract data from the altimeter
